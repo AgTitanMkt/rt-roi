@@ -1,6 +1,10 @@
 pipeline {
   agent any
 
+  parameters {
+    booleanParam(name: 'RUN_DOCKER', defaultValue: true, description: 'Sobe servicos com docker compose no final da pipeline')
+  }
+
   options {
     timestamps()
     disableConcurrentBuilds()
@@ -19,48 +23,31 @@ pipeline {
       }
     }
 
-    stage('Gerar .env') {
-            steps {
-                withCredentials([
-                    string(credentialsId: 'REDTRACK_API_KEY', variable: 'REDTRACK_API_KEY'),
-
-                    string(credentialsId: 'DATABASE_URL', variable: 'DATABASE_URL'),
-                    string(credentialsId: 'POSTGRESS_USER', variable: 'POSTGRESS_USER'),
-                    string(credentialsId: 'POSTGRESS_PASSWORD', variable: 'POSTGRESS_PASSWORD'),
-
-                    string(credentialsId: 'REDIS_URL', variable: 'REDIS_URL'),
-                    string(credentialsId: 'POSTGRES_DB', variable: 'POSTGRES_DB'),
-
-                    string(credentialsId: 'POSTGRES_HOST_PORT', variable: 'POSTGRES_HOST_PORT'),
-                    string(credentialsId: 'REDIS_HOST_PORT', variable: 'REDIS_HOST_PORT'),
-                ]) {
-                    sh '''
-                    cp .env.example .env
-
-                    sed -i "s|REDTRACK_API_KEY=.*|REDTRACK_API_KEY=$REDTRACK_API_KEY|" .env
-
-                    sed -i "s|DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL|" .env
-                    sed -i "s|POSTGRESS_USER=.*|POSTGRESS_USER=$POSTGRESS_USER|" .env
-                    sed -i "s|POSTGRESS_PASSWORD=.*|POSTGRESS_PASSWORD=$POSTGRESS_PASSWORD|" .env
-
-                    sed -i "s|REDIS_URL=.*|REDIS_URL=$REDIS_URL|" .env
-                    sed -i "s|POSTGRES_DB=.*|POSTGRES_DB=$POSTGRES_DB|" .env
-
-                    sed -i "s|POSTGRES_HOST_PORT=.*|POSTGRES_HOST_PORT=$POSTGRES_HOST_PORT|" .env
-                    sed -i "s|REDIS_HOST_PORT=.*|REDIS_HOST_PORT=$REDIS_HOST_PORT|" .env
-
-                    echo "APP_URL=https://roi.agenciatitandev.com" >> .env
-                    '''
-                }
-            }
-        }
-
     stage('Backend CI') {
       steps {
         dir('backend') {
-          sh 'python3 --version'
-          sh 'python3 -m venv .venv'
-          sh '. .venv/bin/activate && pip install --upgrade pip'
+          sh '''#!/bin/sh
+set -eu
+
+python3 --version
+
+# Some Debian/Ubuntu Jenkins agents do not ship ensurepip (python3-venv missing).
+if python3 -m venv .venv; then
+  echo "venv created with ensurepip"
+else
+  echo "python3 -m venv failed; trying fallback without ensurepip"
+  rm -rf .venv
+  python3 -m venv --without-pip .venv
+  . .venv/bin/activate
+  python - <<'PY'
+import urllib.request
+urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')
+PY
+  python get-pip.py
+  rm -f get-pip.py
+fi
+'''
+          sh '. .venv/bin/activate && python -m pip install --upgrade pip'
           sh '. .venv/bin/activate && pip install -r requirements.txt'
           sh '. .venv/bin/activate && python -m compileall -q app'
         }
@@ -79,12 +66,61 @@ pipeline {
       }
     }
 
-    stage('Docker Compose Check') {
+    stage('Prepare Dotenv') {
       when {
-        expression { fileExists('docker-compose.yml') }
+        expression { params.RUN_DOCKER && fileExists('.env.example') }
       }
       steps {
+        sh '''#!/bin/sh
+set -eu
+
+cp .env.example .env
+
+upsert_env() {
+  key="$1"
+  value="$2"
+  if grep -q "^${key}=" .env; then
+    awk -v k="$key" -v v="$value" 'BEGIN {FS=OFS="="} $1==k {$0=k"="v} {print}' .env > .env.tmp
+    mv .env.tmp .env
+  else
+    printf '%s=%s\n' "$key" "$value" >> .env
+  fi
+}
+
+[ -n "${DATABASE_URL:-}" ] && upsert_env DATABASE_URL "$DATABASE_URL"
+[ -n "${REDIS_URL:-}" ] && upsert_env REDIS_URL "$REDIS_URL"
+[ -n "${BACKEND_PORT:-}" ] && upsert_env BACKEND_PORT "$BACKEND_PORT"
+[ -n "${POSTGRES_USER:-}" ] && upsert_env POSTGRES_USER "$POSTGRES_USER"
+[ -n "${POSTGRES_PASSWORD:-}" ] && upsert_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+[ -n "${POSTGRES_DB:-}" ] && upsert_env POSTGRES_DB "$POSTGRES_DB"
+[ -n "${POSTGRES_HOST_PORT:-}" ] && upsert_env POSTGRES_HOST_PORT "$POSTGRES_HOST_PORT"
+[ -n "${REDIS_HOST_PORT:-}" ] && upsert_env REDIS_HOST_PORT "$REDIS_HOST_PORT"
+
+# Keep backend and cron compatible even if Jenkins only sets one key name.
+if [ -n "${REDTRACK_API_KEY:-}" ]; then
+  upsert_env REDTRACK_API_KEY "$REDTRACK_API_KEY"
+  upsert_env REDTRACK_KEY "$REDTRACK_API_KEY"
+fi
+if [ -n "${REDTRACK_KEY:-}" ]; then
+  upsert_env REDTRACK_KEY "$REDTRACK_KEY"
+  upsert_env REDTRACK_API_KEY "$REDTRACK_KEY"
+fi
+
+echo ".env preparado a partir do .env.example"
+'''
+      }
+    }
+
+    stage('Docker Compose Up') {
+      when {
+        expression { params.RUN_DOCKER && fileExists('docker-compose.yml') }
+      }
+      steps {
+        sh 'docker version'
+        sh 'docker compose version'
         sh 'docker compose config -q'
+        sh 'docker compose up -d --build'
+        sh 'docker compose ps'
       }
     }
   }
