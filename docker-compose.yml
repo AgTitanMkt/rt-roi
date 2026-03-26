@@ -1,3 +1,7 @@
+networks:
+  titan_network:
+    external: true
+
 services:
   frontend:
     build: ./frontend
