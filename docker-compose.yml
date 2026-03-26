@@ -7,6 +7,8 @@ services:
     build: ./frontend
     container_name: frontend_app
     restart: always
+    networks:
+      - titan_network
     ports:
       - "3000:80"
     depends_on:
@@ -22,6 +24,8 @@ services:
     build: ./backend
     container_name: fastapi_app
     restart: always
+    networks:
+      - titan_network
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -47,6 +51,8 @@ services:
     image: postgres:16
     container_name: postgres_db
     restart: always
+    networks:
+      - titan_network
     ports:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
     environment:
@@ -66,6 +72,8 @@ services:
     image: redis:7-alpine
     container_name: redis_cache
     restart: always
+    networks:
+      - titan_network
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
     healthcheck:
@@ -90,9 +98,10 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       REDTRACK_API_KEY: ${REDTRACK_API_KEY}
       TZ: America/Sao_Paulo
+    networks:
+      - titan_network
 
 volumes:
   postgres_data:
   redis_data:
-
 
