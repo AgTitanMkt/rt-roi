@@ -95,16 +95,7 @@ upsert_env() {
 [ -n "${POSTGRES_DB:-}" ] && upsert_env POSTGRES_DB "$POSTGRES_DB"
 [ -n "${POSTGRES_HOST_PORT:-}" ] && upsert_env POSTGRES_HOST_PORT "$POSTGRES_HOST_PORT"
 [ -n "${REDIS_HOST_PORT:-}" ] && upsert_env REDIS_HOST_PORT "$REDIS_HOST_PORT"
-
-# Keep backend and cron compatible even if Jenkins only sets one key name.
-if [ -n "${REDTRACK_API_KEY:-}" ]; then
-  upsert_env REDTRACK_API_KEY "$REDTRACK_API_KEY"
-  upsert_env REDTRACK_KEY "$REDTRACK_API_KEY"
-fi
-if [ -n "${REDTRACK_KEY:-}" ]; then
-  upsert_env REDTRACK_KEY "$REDTRACK_KEY"
-  upsert_env REDTRACK_API_KEY "$REDTRACK_KEY"
-fi
+[ -n "${REDTRACK_API_KEY:-}" ] && upsert_env REDTRACK_API_KEY "$REDTRACK_API_KEY"
 
 echo ".env preparado a partir do .env.example"
 '''
