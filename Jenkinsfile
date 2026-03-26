@@ -66,6 +66,51 @@ fi
       }
     }
 
+    stage('Prepare Dotenv') {
+      when {
+        expression { params.RUN_DOCKER && fileExists('.env.example') }
+      }
+      steps {
+        sh '''#!/bin/sh
+set -eu
+
+cp .env.example .env
+
+upsert_env() {
+  key="$1"
+  value="$2"
+  if grep -q "^${key}=" .env; then
+    awk -v k="$key" -v v="$value" 'BEGIN {FS=OFS="="} $1==k {$0=k"="v} {print}' .env > .env.tmp
+    mv .env.tmp .env
+  else
+    printf '%s=%s\n' "$key" "$value" >> .env
+  fi
+}
+
+[ -n "${DATABASE_URL:-}" ] && upsert_env DATABASE_URL "$DATABASE_URL"
+[ -n "${REDIS_URL:-}" ] && upsert_env REDIS_URL "$REDIS_URL"
+[ -n "${BACKEND_PORT:-}" ] && upsert_env BACKEND_PORT "$BACKEND_PORT"
+[ -n "${POSTGRES_USER:-}" ] && upsert_env POSTGRES_USER "$POSTGRES_USER"
+[ -n "${POSTGRES_PASSWORD:-}" ] && upsert_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+[ -n "${POSTGRES_DB:-}" ] && upsert_env POSTGRES_DB "$POSTGRES_DB"
+[ -n "${POSTGRES_HOST_PORT:-}" ] && upsert_env POSTGRES_HOST_PORT "$POSTGRES_HOST_PORT"
+[ -n "${REDIS_HOST_PORT:-}" ] && upsert_env REDIS_HOST_PORT "$REDIS_HOST_PORT"
+
+# Keep backend and cron compatible even if Jenkins only sets one key name.
+if [ -n "${REDTRACK_API_KEY:-}" ]; then
+  upsert_env REDTRACK_API_KEY "$REDTRACK_API_KEY"
+  upsert_env REDTRACK_KEY "$REDTRACK_API_KEY"
+fi
+if [ -n "${REDTRACK_KEY:-}" ]; then
+  upsert_env REDTRACK_KEY "$REDTRACK_KEY"
+  upsert_env REDTRACK_API_KEY "$REDTRACK_KEY"
+fi
+
+echo ".env preparado a partir do .env.example"
+'''
+      }
+    }
+
     stage('Docker Compose Up') {
       when {
         expression { params.RUN_DOCKER && fileExists('docker-compose.yml') }
