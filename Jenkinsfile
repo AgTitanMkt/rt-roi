@@ -1,6 +1,10 @@
 pipeline {
   agent any
 
+  parameters {
+    booleanParam(name: 'RUN_DOCKER', defaultValue: true, description: 'Sobe servicos com docker compose no final da pipeline')
+  }
+
   options {
     timestamps()
     disableConcurrentBuilds()
@@ -62,12 +66,16 @@ fi
       }
     }
 
-    stage('Docker Compose Check') {
+    stage('Docker Compose Up') {
       when {
-        expression { fileExists('docker-compose.yml') }
+        expression { params.RUN_DOCKER && fileExists('docker-compose.yml') }
       }
       steps {
+        sh 'docker version'
+        sh 'docker compose version'
         sh 'docker compose config -q'
+        sh 'docker compose up -d --build'
+        sh 'docker compose ps'
       }
     }
   }
