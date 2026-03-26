@@ -88,7 +88,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDTRACK_KEY: ${REDTRACK_KEY}
+      REDTRACK_API_KEY: ${REDTRACK_API_KEY}
       TZ: America/Sao_Paulo
 
 volumes:
