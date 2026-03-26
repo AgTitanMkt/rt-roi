@@ -27,26 +27,26 @@ pipeline {
       steps {
         dir('backend') {
           sh '''#!/bin/sh
-            set -eu
+set -eu
 
-            python3 --version
+python3 --version
 
-            # Some Debian/Ubuntu Jenkins agents do not ship ensurepip (python3-venv missing).
-            if python3 -m venv .venv; then
-              echo "venv created with ensurepip"
-            else
-              echo "python3 -m venv failed; trying fallback without ensurepip"
-              rm -rf .venv
-              python3 -m venv --without-pip .venv
-              . .venv/bin/activate
-              python - <<'PY'
-            import urllib.request
-            urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')
-            PY
-              python get-pip.py
-              rm -f get-pip.py
-            fi
-            '''
+# Some Debian/Ubuntu Jenkins agents do not ship ensurepip (python3-venv missing).
+if python3 -m venv .venv; then
+  echo "venv created with ensurepip"
+else
+  echo "python3 -m venv failed; trying fallback without ensurepip"
+  rm -rf .venv
+  python3 -m venv --without-pip .venv
+  . .venv/bin/activate
+  python3 - <<'PY'
+import urllib.request
+urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')
+PY
+  python3 get-pip.py
+  rm -f get-pip.py
+fi
+'''
           sh '. .venv/bin/activate && python -m pip install --upgrade pip'
           sh '. .venv/bin/activate && pip install -r requirements.txt'
           sh '. .venv/bin/activate && python -m compileall -q app'
