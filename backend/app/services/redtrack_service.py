@@ -15,7 +15,6 @@ try:
     from .metrics_service import insert_metrics
     from ..schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 except ImportError:
-    # Allow direct execution: python backend/app/services/redtrack_service.py
     current = Path(__file__).resolve()
     backend_root = str(current.parents[2])
     project_root = str(current.parents[3])

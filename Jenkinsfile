@@ -27,26 +27,26 @@ pipeline {
       steps {
         dir('backend') {
           sh '''#!/bin/sh
-set -eu
+            set -eu
 
-python3 --version
+            python3 --version
 
-# Some Debian/Ubuntu Jenkins agents do not ship ensurepip (python3-venv missing).
-if python3 -m venv .venv; then
-  echo "venv created with ensurepip"
-else
-  echo "python3 -m venv failed; trying fallback without ensurepip"
-  rm -rf .venv
-  python3 -m venv --without-pip .venv
-  . .venv/bin/activate
-  python - <<'PY'
-import urllib.request
-urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')
-PY
-  python get-pip.py
-  rm -f get-pip.py
-fi
-'''
+            # Some Debian/Ubuntu Jenkins agents do not ship ensurepip (python3-venv missing).
+            if python3 -m venv .venv; then
+              echo "venv created with ensurepip"
+            else
+              echo "python3 -m venv failed; trying fallback without ensurepip"
+              rm -rf .venv
+              python3 -m venv --without-pip .venv
+              . .venv/bin/activate
+              python - <<'PY'
+            import urllib.request
+            urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')
+            PY
+              python get-pip.py
+              rm -f get-pip.py
+            fi
+            '''
           sh '. .venv/bin/activate && python -m pip install --upgrade pip'
           sh '. .venv/bin/activate && pip install -r requirements.txt'
           sh '. .venv/bin/activate && python -m compileall -q app'
@@ -66,39 +66,40 @@ fi
       }
     }
 
-    stage('Prepare Dotenv') {
+    stage('Gerar .env') {
       when {
         expression { params.RUN_DOCKER && fileExists('.env.example') }
       }
       steps {
-        sh '''#!/bin/sh
-set -eu
+        withCredentials([
+          string(credentialsId: 'DATABASE_URL', variable: 'DATABASE_URL'),
+          string(credentialsId: 'REDIS_URL', variable: 'REDIS_URL'),
+          string(credentialsId: 'BACKEND_PORT', variable: 'BACKEND_PORT'),
+          string(credentialsId: 'POSTGRES_USER', variable: 'POSTGRES_USER'),
+          string(credentialsId: 'POSTGRES_PASSWORD', variable: 'POSTGRES_PASSWORD'),
+          string(credentialsId: 'POSTGRES_DB', variable: 'POSTGRES_DB'),
+          string(credentialsId: 'POSTGRES_HOST_PORT', variable: 'POSTGRES_HOST_PORT'),
+          string(credentialsId: 'REDIS_HOST_PORT', variable: 'REDIS_HOST_PORT'),
+          string(credentialsId: 'REDTRACK_API_KEY', variable: 'REDTRACK_API_KEY')
+        ]) {
+          sh '''#!/bin/sh
+            set -eu
 
-cp .env.example .env
+            cp .env.example .env
 
-upsert_env() {
-  key="$1"
-  value="$2"
-  if grep -q "^${key}=" .env; then
-    awk -v k="$key" -v v="$value" 'BEGIN {FS=OFS="="} $1==k {$0=k"="v} {print}' .env > .env.tmp
-    mv .env.tmp .env
-  else
-    printf '%s=%s\n' "$key" "$value" >> .env
-  fi
-}
+            sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL|" .env
+            sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_URL|" .env
+            sed -i "s|^BACKEND_PORT=.*|BACKEND_PORT=$BACKEND_PORT|" .env
+            sed -i "s|^POSTGRES_USER=.*|POSTGRES_USER=$POSTGRES_USER|" .env
+            sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|" .env
+            sed -i "s|^POSTGRES_DB=.*|POSTGRES_DB=$POSTGRES_DB|" .env
+            sed -i "s|^POSTGRES_HOST_PORT=.*|POSTGRES_HOST_PORT=$POSTGRES_HOST_PORT|" .env
+            sed -i "s|^REDIS_HOST_PORT=.*|REDIS_HOST_PORT=$REDIS_HOST_PORT|" .env
+            sed -i "s|^REDTRACK_API_KEY=.*|REDTRACK_API_KEY=$REDTRACK_API_KEY|" .env
 
-[ -n "${DATABASE_URL:-}" ] && upsert_env DATABASE_URL "$DATABASE_URL"
-[ -n "${REDIS_URL:-}" ] && upsert_env REDIS_URL "$REDIS_URL"
-[ -n "${BACKEND_PORT:-}" ] && upsert_env BACKEND_PORT "$BACKEND_PORT"
-[ -n "${POSTGRES_USER:-}" ] && upsert_env POSTGRES_USER "$POSTGRES_USER"
-[ -n "${POSTGRES_PASSWORD:-}" ] && upsert_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
-[ -n "${POSTGRES_DB:-}" ] && upsert_env POSTGRES_DB "$POSTGRES_DB"
-[ -n "${POSTGRES_HOST_PORT:-}" ] && upsert_env POSTGRES_HOST_PORT "$POSTGRES_HOST_PORT"
-[ -n "${REDIS_HOST_PORT:-}" ] && upsert_env REDIS_HOST_PORT "$REDIS_HOST_PORT"
-[ -n "${REDTRACK_API_KEY:-}" ] && upsert_env REDTRACK_API_KEY "$REDTRACK_API_KEY"
-
-echo ".env preparado a partir do .env.example"
-'''
+            echo ".env preparado com credenciais do Jenkins"
+            '''
+        }
       }
     }
 
