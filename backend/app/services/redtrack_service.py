@@ -7,7 +7,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-import json
 
 from dotenv import load_dotenv, find_dotenv
 
@@ -32,7 +31,7 @@ except ImportError:
 # Keeps compatibility when running from project root, backend folder or IDE run configs.
 load_dotenv(find_dotenv(usecwd=True))
 
-REDTRACK_KEY = os.getenv("REDTRACK_KEY")
+REDTRACK_KEY = os.getenv("REDTRACK_API_KEY")
 REDTRACK_URL = "https://api.redtrack.io/report"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 

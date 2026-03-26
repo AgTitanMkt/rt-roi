@@ -3,12 +3,21 @@ from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
 from ..schemas.metrics_schema import HourlyMetricResponse, SummaryResponse
-from ..services.metrics_service import (
-    get_metrics_by_hour,
-    get_summary as get_summary_service,
-)
+from ..services.redis_service import get_summary_cached, get_hourly_cached
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
+
+def _get_value(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+def _empty_summary_payload():
+    return {
+        "today": {"cost": 0, "profit": 0, "roi": 0},
+        "yesterday": {"cost": 0, "profit": 0, "roi": 0},
+        "comparison": {"cost_change": 0, "profit_change": 0, "roi_change": 0},
+    }
 
 def get_db():
     db = SessionLocal()
@@ -46,24 +55,27 @@ def get_summary(
         ),
         db: Session = Depends(get_db)
 ):
-    result = get_summary_service(db, source)
+    result = get_summary_cached(db, source)
+
+    if not isinstance(result, dict) or "today" not in result:
+        result = _empty_summary_payload()
 
     print(f"RETORNANDO PARA O FRONT: {result}")
     return {
         "today": {
-            "cost": float(result["today"]["cost"] or 0),
-            "profit": float(result["today"]["profit"] or 0),
-            "roi": float(result["today"]["roi"] or 0),
+            "cost": float((result.get("today") or {}).get("cost") or 0),
+            "profit": float((result.get("today") or {}).get("profit") or 0),
+            "roi": float((result.get("today") or {}).get("roi") or 0),
         },
         "yesterday": {
-            "cost": float(result["yesterday"]["cost"] or 0),
-            "profit": float(result["yesterday"]["profit"] or 0),
-            "roi": float(result["yesterday"]["roi"] or 0),
+            "cost": float((result.get("yesterday") or {}).get("cost") or 0),
+            "profit": float((result.get("yesterday") or {}).get("profit") or 0),
+            "roi": float((result.get("yesterday") or {}).get("roi") or 0),
         },
         "comparison": {
-            "cost_change": float(result["comparison"]["cost_change"] or 0),
-            "profit_change": float(result["comparison"]["profit_change"] or 0),
-            "roi_change": float(result["comparison"]["roi_change"] or 0),
+            "cost_change": float((result.get("comparison") or {}).get("cost_change") or 0),
+            "profit_change": float((result.get("comparison") or {}).get("profit_change") or 0),
+            "roi_change": float((result.get("comparison") or {}).get("roi_change") or 0),
         }
     }
 
@@ -109,14 +121,14 @@ def get_hourly(
     ),
     db: Session = Depends(get_db)
 ):
-    rows = get_metrics_by_hour(db, source)
+    rows = get_hourly_cached(db, source)
 
     return [
         {
-            "hour": row.hour,
-            "cost": float(row.cost or 0),
-            "profit": float(row.profit or 0),
-            "roi": float(row.roi or 0),
+            "hour": str(_get_value(row, "hour", "")),
+            "cost": float(_get_value(row, "cost", 0) or 0),
+            "profit": float(_get_value(row, "profit", 0) or 0),
+            "roi": float(_get_value(row, "roi", 0) or 0),
         }
         for row in rows
     ]

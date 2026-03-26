@@ -1,5 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text, tuple_
@@ -99,13 +99,15 @@ def get_summary(db: Session, source: str = None):
     
     today_data = None
     yesterday_data = None
-    
+    today_date = str(date.today())
+    yesterday_date = str(date.today() - timedelta(days=1))
+
     for row in rows:
-        if row.date and str(row.date) == str(date.today()):
+        if row.date and str(row.date) == today_date:
             today_data = row
-        else:
+        elif row.date and str(row.date) == yesterday_date:
             yesterday_data = row
-    
+
     result_obj = {
         "today": {
             "cost": _q2(today_data.cost) if today_data else None,
@@ -123,21 +125,25 @@ def get_summary(db: Session, source: str = None):
             "roi_change": None
         }
     }
-    
+
     # Calcular variação percentual
+    today_cost_value = float(today_data.cost) if (today_data and today_data.cost is not None) else 0.0
+    today_profit_value = float(today_data.profit) if (today_data and today_data.profit is not None) else 0.0
+    today_roi_value = float(today_data.roi) if (today_data and today_data.roi is not None) else 0.0
+    
     if yesterday_data:
         if yesterday_data.cost and yesterday_data.cost != 0:
-            cost_change = ((float(today_data.cost or 0) - float(yesterday_data.cost)) / float(yesterday_data.cost)) * 100
+            cost_change = ((today_cost_value - float(yesterday_data.cost)) / float(yesterday_data.cost)) * 100
             result_obj["comparison"]["cost_change"] = _q2(cost_change)
-        
+
         if yesterday_data.profit and yesterday_data.profit != 0:
-            profit_change = ((float(today_data.profit or 0) - float(yesterday_data.profit)) / float(yesterday_data.profit)) * 100
+            profit_change = ((today_profit_value - float(yesterday_data.profit)) / float(yesterday_data.profit)) * 100
             result_obj["comparison"]["profit_change"] = _q2(profit_change)
-        
+
         if yesterday_data.roi and yesterday_data.roi != 0:
-            roi_change = ((float(today_data.roi or 0) - float(yesterday_data.roi)) / float(yesterday_data.roi)) * 100
+            roi_change = ((today_roi_value - float(yesterday_data.roi)) / float(yesterday_data.roi)) * 100
             result_obj["comparison"]["roi_change"] = _q2(roi_change)
-    
+
     return result_obj
 
 def get_metrics_by_hour(db: Session, source: str = None):
@@ -162,5 +168,4 @@ def get_metrics_by_hour(db: Session, source: str = None):
     result = db.execute(text(query), params)
 
     rows = result.fetchall()
-    print(rows)
     return rows

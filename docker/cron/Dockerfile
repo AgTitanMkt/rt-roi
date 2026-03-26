@@ -25,4 +25,4 @@ RUN crontab /etc/cron.d/my-cron
 # cria log
 RUN touch /var/log/cron.log
 
-CMD ["cron", "-f"]
+CMD ["sh", "-lc", "printenv > /etc/environment && cron -f"]
