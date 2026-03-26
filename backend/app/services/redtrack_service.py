@@ -31,7 +31,7 @@ except ImportError:
 # Keeps compatibility when running from project root, backend folder or IDE run configs.
 load_dotenv(find_dotenv(usecwd=True))
 
-REDTRACK_KEY = os.getenv("REDTRACK_API_KEY")
+REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
 REDTRACK_URL = "https://api.redtrack.io/report"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
@@ -66,7 +66,7 @@ async def redtrack_reports() -> RedtrackResponse:
     hour = now_sp.hour
 
     params = {
-        "api_key": REDTRACK_KEY,
+        "api_key": REDTRACK_API_KEY,
         "group": "source,date",
         "date_from": today,
         "date_to": today,
@@ -76,8 +76,8 @@ async def redtrack_reports() -> RedtrackResponse:
         "page": 1,
     }
 
-    if not REDTRACK_KEY:
-        raise RuntimeError("REDTRACK_KEY nao encontrada. Defina no .env antes de executar.")
+    if not REDTRACK_API_KEY:
+        raise RuntimeError("REDTRACK_API_KEY nao encontrada. Defina no .env antes de executar.")
 
     params = dict(params)
     params["page"] = 1
