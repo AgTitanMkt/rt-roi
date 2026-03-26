@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
-const API_BASE = "/api";
+// Support both relative path (/api) for Docker/local and absolute URL for VPS
+const API_BASE =  "/api";
+
+console.log(`[API] Using base URL: ${API_BASE}`);
 
 export interface SourceOption {
   value: string;
@@ -69,13 +72,25 @@ const withSource = (path: string, source?: string): string => {
 };
 
 const fetchJson = async <T>(path: string): Promise<T> => {
-  const response = await fetch(`${API_BASE}${path}`);
+  const fullUrl = `${API_BASE}${path}`;
+  console.log(`[API] GET ${fullUrl}`);
 
-  if (!response.ok) {
-    throw new Error(`Falha na API (${response.status}) em ${path}`);
+  try {
+    const response = await fetch(fullUrl);
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`[API] Error ${response.status} at ${fullUrl}:`, errorBody);
+      throw new Error(`Falha na API (${response.status}) em ${path}`);
+    }
+
+    const data = await response.json() as T;
+    console.log(`[API] Success ${fullUrl}:`, data);
+    return data;
+  } catch (error) {
+    console.error(`[API] Exception at ${fullUrl}:`, error);
+    throw error;
   }
-
-  return (await response.json()) as T;
 };
 
 export const fetchSummary = (source?: string): Promise<SummaryResponse> =>
