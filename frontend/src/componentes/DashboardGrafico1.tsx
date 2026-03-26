@@ -68,28 +68,43 @@ const DashboardGrafico = ({
     <div
       style={{
         width: "100%",
-        maxWidth: "500px",
-        margin: "20px auto",
+        maxWidth: "980px",
+        margin: "12px auto",
         background: "#01091a",
-        padding: "20px",
+        padding: "clamp(12px, 2.5vw, 20px)",
         borderRadius: "12px",
         color: "white",
         fontFamily: "sans-serif",
+        boxSizing: "border-box",
       }}
     >
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
           marginBottom: "16px",
           gap: "12px",
         }}
       >
         <div>
-          <h2 style={{ fontSize: "16px", margin: 0 }}>Performance Analitica</h2>
+          <h2 style={{ fontSize: "clamp(14px, 2.8vw, 16px)", margin: 0 }}>
+            Performance Analitica
+          </h2>
           <small style={{ color: "#9ca3af" }}>Ultimas horas</small>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+            width: "100%",
+            maxWidth: "420px",
+          }}
+        >
           <small style={{ color: "#9ca3af" }}>
             {isLoading ? "Atualizando..." : `${dadosUnificados.length} pontos`}
           </small>
@@ -103,6 +118,8 @@ const DashboardGrafico = ({
               borderRadius: "8px",
               fontSize: "12px",
               padding: "6px 10px",
+              width: "min(220px, 100%)",
+              minWidth: "150px",
             }}
           >
             {sourceOptions.map((option) => (
@@ -114,7 +131,7 @@ const DashboardGrafico = ({
         </div>
       </div>
 
-      <div style={{ width: "100%", height: "240px" }}>
+      <div style={{ width: "100%", height: "clamp(240px, 52vw, 360px)" }}>
         <p
           style={{
             fontSize: "12px",
@@ -123,7 +140,7 @@ const DashboardGrafico = ({
             fontWeight: "bold",
           }}
         >
-          Gasto e Lucro com linha de ROI
+          Gasto, Lucro e ROI Por Hora.
         </p>
         {dadosUnificados.length === 0 ? (
           <p style={{ fontSize: "12px", color: "#9ca3af" }}>
@@ -240,3 +257,4 @@ const DashboardGrafico = ({
 };
 
 export default DashboardGrafico;
+

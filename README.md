@@ -244,3 +244,28 @@ docker compose up -d --build
 Construir um dashboard rápido, confiável e pronto para escalar sem precisar refatorar toda a base no futuro.
 
 ---
+
+## Jenkins (pipeline inicial)
+
+O repositório agora inclui um `Jenkinsfile` na raiz com uma pipeline CI inicial para:
+
+- Backend (`backend/`): criar venv, instalar dependências e validar sintaxe com `compileall`
+- Frontend (`frontend/`): `npm ci`, `npm run lint` e `npm run build`
+- Infra: validação de `docker-compose.yml` com `docker compose config -q`
+
+### Pré-requisitos no agente Jenkins
+
+- Git
+- Python 3
+- Node.js 20+ e npm
+- Docker CLI + plugin Compose (para o estágio de Docker)
+
+### Como criar o job
+
+1. No Jenkins, crie um novo item do tipo **Pipeline**.
+2. Em **Pipeline Definition**, selecione **Pipeline script from SCM**.
+3. Configure o repositório Git deste projeto.
+4. Mantenha `Jenkinsfile` como **Script Path**.
+5. Salve e execute o build.
+
+> Observação: se o agente não tiver Docker disponível, remova temporariamente o estágio `Docker Compose Check` do `Jenkinsfile`.
