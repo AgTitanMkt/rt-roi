@@ -3,7 +3,11 @@ from sqlalchemy import text
 from .core.database import engine
 from .api.routes import router as metrics_router
 
-app = FastAPI()
+app = FastAPI(
+    cors_allowed_origins="http://187.124.91.100/",
+    cors_allowed_headers=[],
+    cors_allowd_methods=["GET", "OPTIONS"],
+)
 app.include_router(metrics_router)
 
 @app.get("/")
