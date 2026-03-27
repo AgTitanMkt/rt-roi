@@ -4,18 +4,18 @@ import ValorCard from "./componentes/ValorCard.tsx";
 import CardRoi from "./componentes/CardRoi.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
 import {
-  DEFAULT_SOURCE,
-  SOURCE_OPTIONS,
+  DEFAULT_SQUAD,
+  SQUAD_OPTIONS,
   useDashboardData,
 } from "./utils/reqs.ts";
 
 
 function App() {
-  const [selectedSource, setSelectedSource] = useState<string>(DEFAULT_SOURCE);
-  const backendSource = selectedSource === DEFAULT_SOURCE ? undefined : selectedSource;
+  const [selectedSquad, setSelectedSquad] = useState<string>(DEFAULT_SQUAD);
+  const backendSquad = selectedSquad === DEFAULT_SQUAD ? undefined : selectedSquad;
 
   const { summary, hourly, isHealthy, isLoading, error, lastUpdated } =
-    useDashboardData({ source: backendSource });
+    useDashboardData({ squad: backendSquad });
 
   const today = summary?.today;
   const yesterday = summary?.yesterday;
@@ -54,6 +54,13 @@ function App() {
           tendencia={(comparison?.cost_change ?? 0) < 0 ? "baixa" : "alta"}
         />
         <ValorCard
+          nome="Faturamento"
+          valor={formatMoney(today?.revenue)}
+          data={formatMoney(yesterday?.revenue)}
+          categoria={formatPercentage(comparison?.revenue_change)}
+          tendencia={(comparison?.revenue_change ?? 0) < 0 ? "baixa" : "alta"}
+        />
+        <ValorCard
           nome="Lucro"
           valor={formatMoney(today?.profit)}
           data={formatMoney(yesterday?.profit)}
@@ -67,15 +74,16 @@ function App() {
           categoria={formatPercentage(comparison?.roi_change)}
           tendencia={(comparison?.roi_change ?? 0) < 0 ? "baixa" : "alta"}
         />
+
       </section>
 
       <section className="chartPanel">
         <DashboardGrafico1
           hourlyData={hourly}
           isLoading={isLoading}
-          selectedSource={selectedSource}
-          sourceOptions={SOURCE_OPTIONS}
-          onSourceChange={setSelectedSource}
+          selectedSquad={selectedSquad}
+          squadOptions={SQUAD_OPTIONS}
+          onSquadChange={setSelectedSquad}
         />
       </section>
     </div>

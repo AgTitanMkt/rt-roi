@@ -5,27 +5,27 @@ const API_BASE =  "/api";
 
 console.log(`[API] Using base URL: ${API_BASE}`);
 
-export interface SourceOption {
+export interface SquadOption {
   value: string;
   label: string;
 }
 
-export const DEFAULT_SOURCE = "all";
+export const DEFAULT_SQUAD = "all";
 
-export const SOURCE_OPTIONS: SourceOption[] = [
-  { value: DEFAULT_SOURCE, label: "Todas as fontes" },
-  { value: "google", label: "Google" },
-  { value: "facebook", label: "Facebook" },
-  { value: "mgid", label: "MGID" },
-  { value: "mediago", label: "MediaGo" },
-  { value: "newsbreak", label: "NewsBreak" },
-  { value: "taboola", label: "Taboola" },
+export const SQUAD_OPTIONS: SquadOption[] = [
+  { value: DEFAULT_SQUAD, label: "Todos os squads" },
+  { value: "FBR", label: "Facebook" },
+  { value: "NTE", label: "Native - Erick" },
+  { value: "NTL", label: "Native - Luigi" },
+  { value: "YTD", label: "Youtube Fenix" },
+  { value: "YTS", label: "Youtube Shenlong" }
 ];
 
 export interface MetricsData {
   cost: number;
   profit: number;
   roi: number;
+  revenue: number;
 }
 
 export interface SummaryResponse {
@@ -34,14 +34,17 @@ export interface SummaryResponse {
   comparison: {
     cost_change: number;
     profit_change: number;
+    revenue_change: number;
     roi_change: number;
   };
 }
 
 export interface HourlyMetric {
+  squad: string;
   hour: string;
   cost: number;
   profit: number;
+  revenue: number;
   roi: number;
 }
 
@@ -50,7 +53,7 @@ interface HealthResponse {
 }
 
 interface UseDashboardDataParams {
-  source?: string;
+  squad?: string;
   refreshMs?: number;
 }
 
@@ -64,10 +67,11 @@ interface UseDashboardDataResult {
   refreshNow: () => Promise<void>;
 }
 
-const withSource = (path: string, source?: string): string => {
-  if (!source) return path;
+const withSquad = (path: string, squad?: string): string => {
+  if (!squad) return path;
 
-  const params = new URLSearchParams({ source });
+  // Compatibilidade com backend atual (query param ainda chamado source).
+  const params = new URLSearchParams({ source: squad });
   return `${path}?${params.toString()}`;
 };
 
@@ -93,11 +97,11 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   }
 };
 
-export const fetchSummary = (source?: string): Promise<SummaryResponse> =>
-  fetchJson<SummaryResponse>(withSource("/metrics/summary", source));
+export const fetchSummary = (squad?: string): Promise<SummaryResponse> =>
+  fetchJson<SummaryResponse>(withSquad("/metrics/summary", squad));
 
-export const fetchHourly = (source?: string): Promise<HourlyMetric[]> =>
-  fetchJson<HourlyMetric[]>(withSource("/metrics/hourly", source));
+export const fetchHourly = (squad?: string): Promise<HourlyMetric[]> =>
+  fetchJson<HourlyMetric[]>(withSquad("/metrics/hourly", squad));
 
 export const checkBackendHealth = async (): Promise<boolean> => {
   const health = await fetchJson<HealthResponse>("/health");
@@ -105,7 +109,7 @@ export const checkBackendHealth = async (): Promise<boolean> => {
 };
 
 export const useDashboardData = ({
-  source,
+  squad,
   refreshMs = 60_000,
 }: UseDashboardDataParams = {}): UseDashboardDataResult => {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
@@ -121,8 +125,8 @@ export const useDashboardData = ({
     try {
       const [healthy, summaryData, hourlyData] = await Promise.all([
         checkBackendHealth(),
-        fetchSummary(source),
-        fetchHourly(source),
+        fetchSummary(squad),
+        fetchHourly(squad),
       ]);
 
       setIsHealthy(healthy);
@@ -136,7 +140,7 @@ export const useDashboardData = ({
     } finally {
       setIsLoading(false);
     }
-  }, [source]);
+  }, [squad]);
 
   useEffect(() => {
     void loadDashboardData();

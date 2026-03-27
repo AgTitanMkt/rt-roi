@@ -105,6 +105,7 @@ def get_summary(db: Session, source: str = None):
             timezone('America/Sao_Paulo', metric_at)::date as date,
             SUM(cost) as cost,
             SUM(profit) as profit,
+            SUM(revenue) as revenue,
             ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
         FROM tb_metrics_snapshots
         WHERE timezone('America/Sao_Paulo', metric_at)::date IN (:sp_today, :sp_yesterday)
@@ -116,7 +117,7 @@ def get_summary(db: Session, source: str = None):
     }
 
     if source:
-        query += " AND squad = :source"
+        query += " AND UPPER(squad) = UPPER(:source)"
         params["source"] = source
 
     query += " GROUP BY timezone('America/Sao_Paulo', metric_at)::date ORDER BY timezone('America/Sao_Paulo', metric_at)::date DESC"
@@ -126,9 +127,9 @@ def get_summary(db: Session, source: str = None):
     
     if not rows:
         return {
-            "today": {"cost": None, "profit": None, "roi": None},
-            "yesterday": {"cost": None, "profit": None, "roi": None},
-            "comparison": {"cost_change": None, "profit_change": None, "roi_change": None}
+            "today": {"cost": None, "profit": None, "revenue": None, "roi": None},
+            "yesterday": {"cost": None, "profit": None, "revenue": None, "roi": None},
+            "comparison": {"cost_change": None, "profit_change": None, "revenue_change": None, "roi_change": None}
         }
     
     today_data = None
@@ -146,16 +147,20 @@ def get_summary(db: Session, source: str = None):
         "today": {
             "cost": _q2(today_data.cost) if today_data else None,
             "profit": _q2(today_data.profit) if today_data else None,
+            "revenue": _q2(today_data.revenue) if today_data else None,
             "roi": _q4(today_data.roi) if today_data else None,
+
         },
         "yesterday": {
             "cost": _q2(yesterday_data.cost) if yesterday_data else None,
             "profit": _q2(yesterday_data.profit) if yesterday_data else None,
+            "revenue": _q2(yesterday_data.revenue) if yesterday_data else None,
             "roi": _q4(yesterday_data.roi) if yesterday_data else None,
         },
         "comparison": {
             "cost_change": None,
             "profit_change": None,
+            "revenue_change": None,
             "roi_change": None
         }
     }
@@ -163,6 +168,7 @@ def get_summary(db: Session, source: str = None):
     # Calcular variação percentual
     today_cost_value = float(today_data.cost) if (today_data and today_data.cost is not None) else 0.0
     today_profit_value = float(today_data.profit) if (today_data and today_data.profit is not None) else 0.0
+    today_revenue_value = float(today_data.revenue) if (today_data and today_data.revenue is not None) else 0.0
     today_roi_value = float(today_data.roi) if (today_data and today_data.roi is not None) else 0.0
     
     if yesterday_data:
@@ -177,6 +183,10 @@ def get_summary(db: Session, source: str = None):
         if yesterday_data.roi and yesterday_data.roi != 0:
             roi_change = ((today_roi_value - float(yesterday_data.roi)) / float(yesterday_data.roi)) * 100
             result_obj["comparison"]["roi_change"] = _q2(roi_change)
+
+        if yesterday_data.revenue and yesterday_data.revenue != 0:
+            revenue_change = ((today_revenue_value - float(yesterday_data.revenue)) / float(yesterday_data.revenue)) * 100
+            result_obj["comparison"]["revenue_change"] = _q2(revenue_change)
 
     return result_obj
 
@@ -198,7 +208,7 @@ def get_metrics_by_hour(db: Session, source: str = None):
     params: dict[str, object] = {"sp_today": sp_today}
 
     if source:
-        query += " AND squad = :source"
+        query += " AND UPPER(squad) = UPPER(:source)"
         params["source"] = source
 
     query += " GROUP BY squad, hour ORDER BY squad, hour"

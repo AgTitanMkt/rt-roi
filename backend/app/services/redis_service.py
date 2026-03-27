@@ -15,7 +15,7 @@ CACHE_TTL_SECONDS = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "300"))
 def _normalize_source(source):
     if source is None:
         return None
-    normalized = source.strip().lower()
+    normalized = source.strip()
     return normalized or None
 
 

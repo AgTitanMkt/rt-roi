@@ -12,22 +12,22 @@ import {
   ReferenceLine,
 } from "recharts";
 import { RechartsDevtools } from "@recharts/devtools";
-import type { HourlyMetric, SourceOption } from "../utils/reqs.ts";
+import type { HourlyMetric, SquadOption } from "../utils/reqs.ts";
 
 interface DashboardGraficoProps {
   hourlyData: HourlyMetric[];
   isLoading?: boolean;
-  selectedSource: string;
-  sourceOptions: SourceOption[];
-  onSourceChange: (value: string) => void;
+  selectedSquad: string;
+  squadOptions: SquadOption[];
+  onSquadChange: (value: string) => void;
 }
 
 const DashboardGrafico = ({
   hourlyData,
   isLoading = false,
-  selectedSource,
-  sourceOptions,
-  onSourceChange,
+  selectedSquad,
+  squadOptions,
+  onSquadChange,
 }: DashboardGraficoProps) => {
   const dadosUnificados = useMemo(
     () =>
@@ -39,7 +39,7 @@ const DashboardGrafico = ({
 
           return {
             label: `${hourLabel}:00`,
-            lucro: Number(item.profit ?? 0),
+            faturamento: Number(item.revenue ?? 0),
             gasto: Number(item.cost ?? 0),
             relacao,
           };
@@ -109,8 +109,8 @@ const DashboardGrafico = ({
             {isLoading ? "Atualizando..." : `${dadosUnificados.length} pontos`}
           </small>
           <select
-            value={selectedSource}
-            onChange={(event) => onSourceChange(event.target.value)}
+            value={selectedSquad}
+            onChange={(event) => onSquadChange(event.target.value)}
             style={{
               background: "#111827",
               border: "1px solid #374151",
@@ -122,7 +122,7 @@ const DashboardGrafico = ({
               minWidth: "150px",
             }}
           >
-            {sourceOptions.map((option) => (
+            {squadOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -140,7 +140,7 @@ const DashboardGrafico = ({
             fontWeight: "bold",
           }}
         >
-          Gasto, Lucro e ROI Por Hora.
+          Gasto, Faturamento e ROI Por Hora.
         </p>
         {dadosUnificados.length === 0 ? (
           <p style={{ fontSize: "12px", color: "#9ca3af" }}>
@@ -190,14 +190,14 @@ const DashboardGrafico = ({
                     return [`$${numericValue.toFixed(2)}`, "Gasto"];
                   }
 
-                  return [`$${numericValue.toFixed(2)}`, "Lucro"];
+                  return [`$${numericValue.toFixed(2)}`, "Faturamento"];
                 }}
               />
               <Legend
                 wrapperStyle={{ fontSize: "11px", color: "#9ca3af" }}
                 formatter={(value: string) => {
                   if (value === "gasto") return "Gasto";
-                  if (value === "lucro") return "Lucro";
+                  if (value === "faturamento") return "Faturamento";
                   return "ROI";
                 }}
               />
@@ -210,7 +210,7 @@ const DashboardGrafico = ({
               />
               <Bar
                 yAxisId="valores"
-                dataKey="lucro"
+                dataKey="faturamento"
                 fill="#2563eb"
                 barSize={14}
                 radius={[4, 4, 0, 0]}
