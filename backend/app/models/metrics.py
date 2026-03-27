@@ -9,8 +9,9 @@ class MetricsSnapshot(Base):
     metric_at = Column(TIMESTAMP(timezone=True), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
-    source_alias = Column(Text)
+    squad = Column(Text)
 
     cost = Column(Numeric(12, 2), default=0)
     profit = Column(Numeric(12, 2), default=0)
     roi = Column(Numeric(8, 4), default=0)
+    revenue = Column(Numeric(8, 2), default=0)

@@ -230,7 +230,7 @@ const DashboardGrafico = ({
                 dataKey="relacao"
                 stroke="#22c55e"
                 dot={({ cx, cy, payload }) => {
-                  const isNegative = Number(payload?.relacao ?? 0) < 0;
+                  const isNegative = Number(payload?.relacao ?? 0) < 1;
 
                   return (
                     <circle

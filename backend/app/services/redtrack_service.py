@@ -26,8 +26,6 @@ except ImportError:
     from app.services.metrics_service import insert_metrics
     from app.schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 
-# Resolve .env starting from current working directory.
-# Keeps compatibility when running from project root, backend folder or IDE run configs.
 load_dotenv(find_dotenv(usecwd=True))
 
 REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
@@ -39,9 +37,10 @@ def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
             "metric_at": item.date,
-            "source_alias": item.source_alias,
+            "squad": item.squad,
             "cost": item.cost,
             "profit": item.profit,
+            "revenue": item.revenue,
             "roi": item.roi,
         }
         for item in data
@@ -66,7 +65,7 @@ async def redtrack_reports() -> RedtrackResponse:
 
     params = {
         "api_key": REDTRACK_API_KEY,
-        "group": "source,date",
+        "group": "campaign,date",
         "date_from": today,
         "date_to": today,
         "time_interval": "lasthour",
@@ -87,7 +86,6 @@ async def redtrack_reports() -> RedtrackResponse:
         cost_total = 0.0
         profit_total = 0.0
 
-
         while True:
             res = await client.get(
                 REDTRACK_URL,
@@ -95,6 +93,9 @@ async def redtrack_reports() -> RedtrackResponse:
             )
             res.raise_for_status()
             page_rows = res.json()
+
+            if not isinstance(page_rows, list):
+                raise RuntimeError("Resposta inesperada da API Redtrack: esperado lista de registros.")
 
             for x in page_rows:
                 cost = float(x.get("cost", 0) or 0)
@@ -113,26 +114,29 @@ async def redtrack_reports() -> RedtrackResponse:
                 )
 
                 if cost > 0 and profit != 0:
+                    campaign = str(x.get("campaign") or "").strip()
+                    campaign_parts = [part.strip() for part in campaign.split("|") if part.strip()]
+
+                    responsible = campaign_parts[1] if len(campaign_parts) > 1 else (campaign_parts[0] if campaign_parts else "unknown")
+                    squad = responsible.split("-")[0]
+
                     res_data = RedtrackReportItem(
-                        source_alias=x.get("source_alias", "unknown"),
+                        squad=squad,
                         date=report_datetime,
                         cost=cost,
+                        revenue=float(x.get("revenue", 0) or 0),
                         profit=profit,
-                        roi=float(x.get("roi", 0) or 0)
+                        roi=float(x.get("roi", 0) or 0),
                     )
 
                     data.append(res_data)
                     profit_total += profit
                     cost_total += cost
 
-
-            print(params["page"])
-            params["page"] += 1
-            print(len(data))
-
             if len(page_rows) < params["per"]:
                 break
 
+            params["page"] += 1
 
         roi_total = (profit_total / cost_total) if cost_total > 0 else 0.0
 

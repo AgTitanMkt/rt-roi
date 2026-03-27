@@ -7,10 +7,11 @@ from typing import List
 class RedtrackReportItem(BaseModel):
     """Schema para um item individual do relatório Redtrack"""
     
-    source_alias: str = Field(..., description="Alias da fonte de tráfego")
+    squad: str = Field(..., description="Nome do squad")
     date: datetime = Field(..., description="Data e hora do relatório com timezone (America/Sao_Paulo)")
     cost: float = Field(..., description="Custo em moeda")
     profit: float = Field(..., description="Lucro em moeda")
+    revenue: float = Field(..., description="Revenue em moeda")
     roi: float = Field(..., description="ROI (Return on Investment)")
 
     class Config:
