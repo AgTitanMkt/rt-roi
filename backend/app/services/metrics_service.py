@@ -185,9 +185,11 @@ def get_metrics_by_hour(db: Session, source: str = None):
 
     query = """
         SELECT
+            squad,
             EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
             SUM(cost) as cost,
             SUM(profit) as profit,
+            SUM(revenue) as revenue,
             ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
         FROM tb_metrics_snapshots
         WHERE timezone('America/Sao_Paulo', metric_at)::date = :sp_today
@@ -199,7 +201,7 @@ def get_metrics_by_hour(db: Session, source: str = None):
         query += " AND squad = :source"
         params["source"] = source
 
-    query += " GROUP BY hour ORDER BY hour"
+    query += " GROUP BY squad, hour ORDER BY squad, hour"
 
     result = db.execute(text(query), params)
 

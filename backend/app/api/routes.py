@@ -96,15 +96,19 @@ def get_summary(
                 "application/json": {
                     "example": [
                         {
+                            "squad": "YTD",
                             "hour": "14",
                             "cost": 12.1,
                             "profit": 4.2,
+                            "revenue": 45.0,
                             "roi": 0.35,
                         },
                         {
+                            "squad": "YTD",
                             "hour": "15",
                             "cost": 10.4,
                             "profit": 3.1,
+                            "revenue": 30.0,
                             "roi": 0.30,
                         },
                     ]
@@ -125,9 +129,11 @@ def get_hourly(
 
     return [
         {
+            "squad": str(_get_value(row, "squad", "")),
             "hour": str(_get_value(row, "hour", "")),
             "cost": float(_get_value(row, "cost", 0) or 0),
             "profit": float(_get_value(row, "profit", 0) or 0),
+            "revenue": float(_get_value(row, "revenue", 0) or 0),
             "roi": float(_get_value(row, "roi", 0) or 0),
         }
         for row in rows
