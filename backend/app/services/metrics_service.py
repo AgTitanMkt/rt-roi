@@ -191,40 +191,49 @@ def get_summary(db: Session, source: str = None):
     return result_obj
 
 def get_metrics_by_hour(db: Session, source: str = None):
-    sp_today = datetime.now(SAO_PAULO_TZ).date()
+    window_end = datetime.now(SAO_PAULO_TZ)
+    window_start = window_end - timedelta(hours=24)
 
     if source:
         query = """
             SELECT
+                squad,
                 EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
                 SUM(cost) as cost,
                 SUM(profit) as profit,
                 SUM(revenue) as revenue,
                 ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
             FROM tb_metrics_snapshots
-            WHERE timezone('America/Sao_Paulo', metric_at)::date = :sp_today
+            WHERE metric_at >= :window_start
+              AND metric_at <= :window_end
               AND UPPER(squad) = UPPER(:source)
             GROUP BY squad, hour
             ORDER BY hour
         """
         params: dict[str, object] = {
-            "sp_today": sp_today,
+            "window_start": window_start,
+            "window_end": window_end,
             "source": source,
         }
     else:
         query = """
             SELECT
+                NULL::text as squad,
                 EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
                 SUM(cost) as cost,
                 SUM(profit) as profit,
                 SUM(revenue) as revenue,
                 ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
             FROM tb_metrics_snapshots
-            WHERE timezone('America/Sao_Paulo', metric_at)::date = :sp_today
+            WHERE metric_at >= :window_start
+              AND metric_at <= :window_end
             GROUP BY hour
             ORDER BY hour
         """
-        params = {"sp_today": sp_today}
+        params = {
+            "window_start": window_start,
+            "window_end": window_end,
+        }
 
     result = db.execute(text(query), params)
 
