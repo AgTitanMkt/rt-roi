@@ -17,10 +17,11 @@ class RedtrackReportItem(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "source_alias": "mediago",
+                "squad": "YTS",
                 "date": "2026-03-20T14:00:00-03:00",
                 "cost": 169.21,
                 "profit": 60.79,
+                "revenue": 45.0,
                 "roi": 0.36
             }
         }

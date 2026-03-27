@@ -26,6 +26,8 @@ def insert_metrics(db: Session, data: list):
     for item in data:
         norm_item = {
             **item,
+            "metric_at": item["metric_at"],
+            "squad": item["squad"],
             "cost": _q2(item["cost"]),
             "profit": _q2(item["profit"]),
             "revenue": _q2(item["revenue"]),

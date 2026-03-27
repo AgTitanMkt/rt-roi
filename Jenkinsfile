@@ -111,8 +111,17 @@ fi
         sh 'docker version'
         sh 'docker compose version'
         sh 'docker compose config -q'
-        sh 'docker compose up -d --build backend frontend cron'
-        sh 'docker compose ps'
+        sh '''#!/bin/sh
+          set -eu
+
+          # Mantem postgres/redis existentes e sobe apenas servicos da aplicacao.
+          docker compose up -d --no-deps --build backend frontend cron
+
+          # Garante migração do schema sem tocar nos dados existentes.
+          docker compose exec -T backend sh -lc 'cd /app && alembic upgrade head'
+
+          docker compose ps
+        '''
       }
     }
   }
