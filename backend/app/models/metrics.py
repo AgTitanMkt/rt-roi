@@ -6,8 +6,8 @@ class MetricsSnapshot(Base):
     __tablename__ = "tb_metrics_snapshots"
 
     id = Column(Integer, primary_key=True, index=True)
-    metric_at = Column(TIMESTAMP, nullable=False)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    metric_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     source_alias = Column(Text)
 

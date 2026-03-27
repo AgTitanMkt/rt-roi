@@ -38,7 +38,7 @@ SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
-            "metric_at": item.date.replace(tzinfo=None),
+            "metric_at": item.date,
             "source_alias": item.source_alias,
             "cost": item.cost,
             "profit": item.profit,
