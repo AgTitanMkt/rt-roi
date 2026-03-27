@@ -15,7 +15,6 @@ try:
     from .metrics_service import insert_metrics
     from ..schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 except ImportError:
-    # Allow direct execution: python backend/app/services/redtrack_service.py
     current = Path(__file__).resolve()
     backend_root = str(current.parents[2])
     project_root = str(current.parents[3])
@@ -31,7 +30,7 @@ except ImportError:
 # Keeps compatibility when running from project root, backend folder or IDE run configs.
 load_dotenv(find_dotenv(usecwd=True))
 
-REDTRACK_KEY = os.getenv("REDTRACK_API_KEY")
+REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
 REDTRACK_URL = "https://api.redtrack.io/report"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
@@ -39,7 +38,7 @@ SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
-            "metric_at": item.date.replace(tzinfo=None),
+            "metric_at": item.date,
             "source_alias": item.source_alias,
             "cost": item.cost,
             "profit": item.profit,
@@ -66,7 +65,7 @@ async def redtrack_reports() -> RedtrackResponse:
     hour = now_sp.hour
 
     params = {
-        "api_key": REDTRACK_KEY,
+        "api_key": REDTRACK_API_KEY,
         "group": "source,date",
         "date_from": today,
         "date_to": today,
@@ -76,8 +75,8 @@ async def redtrack_reports() -> RedtrackResponse:
         "page": 1,
     }
 
-    if not REDTRACK_KEY:
-        raise RuntimeError("REDTRACK_KEY nao encontrada. Defina no .env antes de executar.")
+    if not REDTRACK_API_KEY:
+        raise RuntimeError("REDTRACK_API_KEY nao encontrada. Defina no .env antes de executar.")
 
     params = dict(params)
     params["page"] = 1

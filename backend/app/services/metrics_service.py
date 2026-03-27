@@ -1,9 +1,13 @@
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text, tuple_
 from ..models.metrics import MetricsSnapshot
+
+
+SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
 
 def _q2(value) -> Decimal:
@@ -69,23 +73,29 @@ def insert_metrics(db: Session, data: list):
     }
 
 def get_summary(db: Session, source: str = None):
+    sp_today = datetime.now(SAO_PAULO_TZ).date()
+    sp_yesterday = sp_today - timedelta(days=1)
+
     query = """
         SELECT
-            DATE(metric_at) as date,
+            timezone('America/Sao_Paulo', metric_at)::date as date,
             SUM(cost) as cost,
             SUM(profit) as profit,
             ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
         FROM tb_metrics_snapshots
-        WHERE DATE(metric_at) IN (CURRENT_DATE, CURRENT_DATE - 1)
+        WHERE timezone('America/Sao_Paulo', metric_at)::date IN (:sp_today, :sp_yesterday)
     """
 
-    params = {}
+    params = {
+        "sp_today": sp_today,
+        "sp_yesterday": sp_yesterday,
+    }
 
     if source:
         query += " AND source_alias = :source"
         params["source"] = source
 
-    query += " GROUP BY DATE(metric_at) ORDER BY DATE(metric_at) DESC"
+    query += " GROUP BY timezone('America/Sao_Paulo', metric_at)::date ORDER BY timezone('America/Sao_Paulo', metric_at)::date DESC"
 
     result = db.execute(text(query), params)
     rows = result.fetchall()
@@ -99,8 +109,8 @@ def get_summary(db: Session, source: str = None):
     
     today_data = None
     yesterday_data = None
-    today_date = str(date.today())
-    yesterday_date = str(date.today() - timedelta(days=1))
+    today_date = str(sp_today)
+    yesterday_date = str(sp_yesterday)
 
     for row in rows:
         if row.date and str(row.date) == today_date:
@@ -147,17 +157,19 @@ def get_summary(db: Session, source: str = None):
     return result_obj
 
 def get_metrics_by_hour(db: Session, source: str = None):
+    sp_today = datetime.now(SAO_PAULO_TZ).date()
+
     query = """
         SELECT
-            EXTRACT(HOUR FROM metric_at)::text as hour,
+            EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
             SUM(cost) as cost,
             SUM(profit) as profit,
             ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
         FROM tb_metrics_snapshots
-        WHERE DATE(metric_at) = CURRENT_DATE
+        WHERE timezone('America/Sao_Paulo', metric_at)::date = :sp_today
     """
 
-    params = {}
+    params = {"sp_today": sp_today}
 
     if source:
         query += " AND source_alias = :source"
