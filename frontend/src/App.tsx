@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import "./App.css";
 import ValorCard from "./componentes/ValorCard.tsx";
 import CardRoi from "./componentes/CardRoi.tsx";
@@ -20,6 +20,35 @@ function App() {
   const today = summary?.today;
   const yesterday = summary?.yesterday;
   const comparison = summary?.comparison;
+
+  const resolveRevenue = (metrics?: {
+    revenue?: number | null;
+    cost?: number | null;
+    profit?: number | null;
+    roi?: number | null;
+  }): number => {
+    if (!metrics) return 0;
+    if (metrics.revenue != null) return metrics.revenue;
+    if (metrics.cost != null && metrics.profit != null) return metrics.cost + metrics.profit;
+    if (metrics.cost != null && metrics.roi != null) return metrics.cost * (1 + metrics.roi);
+    return 0;
+  };
+
+  const todayRevenue = resolveRevenue(today);
+  const yesterdayRevenue = resolveRevenue(yesterday);
+
+  const resolvedRevenueChange =
+    comparison?.revenue_change ??
+    (yesterdayRevenue !== 0 ? ((todayRevenue - yesterdayRevenue) / Math.abs(yesterdayRevenue)) * 100 : 0);
+
+  const hourlyWithResolvedRevenue = useMemo(
+    () =>
+      hourly.map((item) => ({
+        ...item,
+        revenue: resolveRevenue(item),
+      })),
+    [hourly],
+  );
 
   const formatMoney = (value: number | undefined): number =>
     Number((value ?? 0).toFixed(2));
@@ -55,10 +84,10 @@ function App() {
         />
         <ValorCard
           nome="Faturamento"
-          valor={formatMoney(today?.revenue)}
-          data={formatMoney(yesterday?.revenue)}
-          categoria={formatPercentage(comparison?.revenue_change)}
-          tendencia={(comparison?.revenue_change ?? 0) < 0 ? "baixa" : "alta"}
+          valor={formatMoney(todayRevenue)}
+          data={formatMoney(yesterdayRevenue)}
+          categoria={formatPercentage(resolvedRevenueChange)}
+          tendencia={resolvedRevenueChange < 0 ? "baixa" : "alta"}
         />
         <ValorCard
           nome="Lucro"
@@ -79,7 +108,7 @@ function App() {
 
       <section className="chartPanel">
         <DashboardGrafico1
-          hourlyData={hourly}
+          hourlyData={hourlyWithResolvedRevenue}
           isLoading={isLoading}
           selectedSquad={selectedSquad}
           squadOptions={SQUAD_OPTIONS}

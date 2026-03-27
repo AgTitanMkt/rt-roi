@@ -193,25 +193,38 @@ def get_summary(db: Session, source: str = None):
 def get_metrics_by_hour(db: Session, source: str = None):
     sp_today = datetime.now(SAO_PAULO_TZ).date()
 
-    query = """
-        SELECT
-            squad,
-            EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
-            SUM(cost) as cost,
-            SUM(profit) as profit,
-            SUM(revenue) as revenue,
-            ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
-        FROM tb_metrics_snapshots
-        WHERE timezone('America/Sao_Paulo', metric_at)::date = :sp_today
-    """
-
-    params: dict[str, object] = {"sp_today": sp_today}
-
     if source:
-        query += " AND UPPER(squad) = UPPER(:source)"
-        params["source"] = source
-
-    query += " GROUP BY squad, hour ORDER BY squad, hour"
+        query = """
+            SELECT
+                EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
+                SUM(cost) as cost,
+                SUM(profit) as profit,
+                SUM(revenue) as revenue,
+                ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
+            FROM tb_metrics_snapshots
+            WHERE timezone('America/Sao_Paulo', metric_at)::date = :sp_today
+              AND UPPER(squad) = UPPER(:source)
+            GROUP BY squad, hour
+            ORDER BY hour
+        """
+        params: dict[str, object] = {
+            "sp_today": sp_today,
+            "source": source,
+        }
+    else:
+        query = """
+            SELECT
+                EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
+                SUM(cost) as cost,
+                SUM(profit) as profit,
+                SUM(revenue) as revenue,
+                ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
+            FROM tb_metrics_snapshots
+            WHERE timezone('America/Sao_Paulo', metric_at)::date = :sp_today
+            GROUP BY hour
+            ORDER BY hour
+        """
+        params = {"sp_today": sp_today}
 
     result = db.execute(text(query), params)
 

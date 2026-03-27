@@ -37,7 +37,6 @@ def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
             "metric_at": item.date,
-            "squad": item.squad,
             "cost": item.cost,
             "profit": item.profit,
             "revenue": item.revenue,
@@ -121,7 +120,6 @@ async def redtrack_reports() -> RedtrackResponse:
                     squad = responsible.split("-")[0]
 
                     res_data = RedtrackReportItem(
-                        squad=squad,
                         date=report_datetime,
                         cost=cost,
                         revenue=float(x.get("revenue", 0) or 0),

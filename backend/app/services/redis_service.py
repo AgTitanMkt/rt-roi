@@ -39,7 +39,7 @@ def _hourly_to_list(rows):
         mapping = row._mapping if hasattr(row, "_mapping") else row
         result.append(
             {
-                "squad": str(mapping["squad"]),
+                "squad": str(mapping.get("squad") or ""),
                 "hour": str(mapping.get("hour") or ""),
                 "cost": float(mapping.get("cost") or 0),
                 "profit": float(mapping.get("profit") or 0),

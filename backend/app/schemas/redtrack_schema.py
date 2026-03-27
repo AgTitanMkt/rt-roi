@@ -7,7 +7,6 @@ from typing import List
 class RedtrackReportItem(BaseModel):
     """Schema para um item individual do relatório Redtrack"""
     
-    squad: str = Field(..., description="Nome do squad")
     date: datetime = Field(..., description="Data e hora do relatório com timezone (America/Sao_Paulo)")
     cost: float = Field(..., description="Custo em moeda")
     profit: float = Field(..., description="Lucro em moeda")
@@ -17,7 +16,6 @@ class RedtrackReportItem(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "squad": "YTS",
                 "date": "2026-03-20T14:00:00-03:00",
                 "cost": 169.21,
                 "profit": 60.79,
