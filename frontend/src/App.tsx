@@ -1,25 +1,54 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import "./App.css";
 import ValorCard from "./componentes/ValorCard.tsx";
 import CardRoi from "./componentes/CardRoi.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
 import {
-  DEFAULT_SOURCE,
-  SOURCE_OPTIONS,
+  DEFAULT_SQUAD,
+  SQUAD_OPTIONS,
   useDashboardData,
 } from "./utils/reqs.ts";
 
 
 function App() {
-  const [selectedSource, setSelectedSource] = useState<string>(DEFAULT_SOURCE);
-  const backendSource = selectedSource === DEFAULT_SOURCE ? undefined : selectedSource;
+  const [selectedSquad, setSelectedSquad] = useState<string>(DEFAULT_SQUAD);
+  const backendSquad = selectedSquad === DEFAULT_SQUAD ? undefined : selectedSquad;
 
   const { summary, hourly, isHealthy, isLoading, error, lastUpdated } =
-    useDashboardData({ source: backendSource });
+    useDashboardData({ squad: backendSquad });
 
   const today = summary?.today;
   const yesterday = summary?.yesterday;
   const comparison = summary?.comparison;
+
+  const resolveRevenue = (metrics?: {
+    revenue?: number | null;
+    cost?: number | null;
+    profit?: number | null;
+    roi?: number | null;
+  }): number => {
+    if (!metrics) return 0;
+    if (metrics.revenue != null) return metrics.revenue;
+    if (metrics.cost != null && metrics.profit != null) return metrics.cost + metrics.profit;
+    if (metrics.cost != null && metrics.roi != null) return metrics.cost * (1 + metrics.roi);
+    return 0;
+  };
+
+  const todayRevenue = resolveRevenue(today);
+  const yesterdayRevenue = resolveRevenue(yesterday);
+
+  const resolvedRevenueChange =
+    comparison?.revenue_change ??
+    (yesterdayRevenue !== 0 ? ((todayRevenue - yesterdayRevenue) / Math.abs(yesterdayRevenue)) * 100 : 0);
+
+  const hourlyWithResolvedRevenue = useMemo(
+    () =>
+      hourly.map((item) => ({
+        ...item,
+        revenue: resolveRevenue(item),
+      })),
+    [hourly],
+  );
 
   const formatMoney = (value: number | undefined): number =>
     Number((value ?? 0).toFixed(2));
@@ -54,6 +83,13 @@ function App() {
           tendencia={(comparison?.cost_change ?? 0) < 0 ? "baixa" : "alta"}
         />
         <ValorCard
+          nome="Faturamento"
+          valor={formatMoney(todayRevenue)}
+          data={formatMoney(yesterdayRevenue)}
+          categoria={formatPercentage(resolvedRevenueChange)}
+          tendencia={resolvedRevenueChange < 0 ? "baixa" : "alta"}
+        />
+        <ValorCard
           nome="Lucro"
           valor={formatMoney(today?.profit)}
           data={formatMoney(yesterday?.profit)}
@@ -67,15 +103,16 @@ function App() {
           categoria={formatPercentage(comparison?.roi_change)}
           tendencia={(comparison?.roi_change ?? 0) < 0 ? "baixa" : "alta"}
         />
+
       </section>
 
       <section className="chartPanel">
         <DashboardGrafico1
-          hourlyData={hourly}
+          hourlyData={hourlyWithResolvedRevenue}
           isLoading={isLoading}
-          selectedSource={selectedSource}
-          sourceOptions={SOURCE_OPTIONS}
-          onSourceChange={setSelectedSource}
+          selectedSquad={selectedSquad}
+          squadOptions={SQUAD_OPTIONS}
+          onSquadChange={setSelectedSquad}
         />
       </section>
     </div>

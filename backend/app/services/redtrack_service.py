@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import asyncio
 import sys
@@ -26,8 +26,6 @@ except ImportError:
     from app.services.metrics_service import insert_metrics
     from app.schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 
-# Resolve .env starting from current working directory.
-# Keeps compatibility when running from project root, backend folder or IDE run configs.
 load_dotenv(find_dotenv(usecwd=True))
 
 REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
@@ -38,10 +36,11 @@ SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
+            "squad": item.squad,
             "metric_at": item.date,
-            "source_alias": item.source_alias,
             "cost": item.cost,
             "profit": item.profit,
+            "revenue": item.revenue,
             "roi": item.roi,
         }
         for item in data
@@ -61,14 +60,15 @@ def persist_metrics_report(data: RedtrackResponse) -> None:
 
 async def redtrack_reports() -> RedtrackResponse:
     now_sp = datetime.now(SAO_PAULO_TZ)
-    today = now_sp.strftime("%Y-%m-%d")
-    hour = now_sp.hour
+    last_closed_hour = now_sp.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+    date_from = last_closed_hour.strftime("%Y-%m-%d")
+    date_to = now_sp.strftime("%Y-%m-%d")
 
     params = {
         "api_key": REDTRACK_API_KEY,
-        "group": "source,date",
-        "date_from": today,
-        "date_to": today,
+        "group": "campaign,date",
+        "date_from": date_from,
+        "date_to": date_to,
         "time_interval": "lasthour",
         "timezone": "America/Sao_Paulo",
         "per": 1000,
@@ -87,7 +87,6 @@ async def redtrack_reports() -> RedtrackResponse:
         cost_total = 0.0
         profit_total = 0.0
 
-
         while True:
             res = await client.get(
                 REDTRACK_URL,
@@ -95,6 +94,9 @@ async def redtrack_reports() -> RedtrackResponse:
             )
             res.raise_for_status()
             page_rows = res.json()
+
+            if not isinstance(page_rows, list):
+                raise RuntimeError("Resposta inesperada da API Redtrack: esperado lista de registros.")
 
             for x in page_rows:
                 cost = float(x.get("cost", 0) or 0)
@@ -104,8 +106,16 @@ async def redtrack_reports() -> RedtrackResponse:
                 if not raw_date:
                     continue
 
+                report_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+                if report_date == last_closed_hour.date():
+                    metric_hour = last_closed_hour.hour
+                elif report_date == now_sp.date():
+                    metric_hour = now_sp.hour
+                else:
+                    metric_hour = 0
+
                 report_datetime = datetime.strptime(raw_date, "%Y-%m-%d").replace(
-                    hour=hour,
+                    hour=metric_hour,
                     minute=0,
                     second=0,
                     microsecond=0,
@@ -113,26 +123,29 @@ async def redtrack_reports() -> RedtrackResponse:
                 )
 
                 if cost > 0 and profit != 0:
+                    campaign = str(x.get("campaign") or "").strip()
+                    campaign_parts = [part.strip() for part in campaign.split("|") if part.strip()]
+
+                    responsible = campaign_parts[1] if len(campaign_parts) > 1 else (campaign_parts[0] if campaign_parts else "unknown")
+                    squad = responsible.split("-")[0]
+
                     res_data = RedtrackReportItem(
-                        source_alias=x.get("source_alias", "unknown"),
+                        squad=squad,
                         date=report_datetime,
                         cost=cost,
+                        revenue=float(x.get("revenue", 0) or 0),
                         profit=profit,
-                        roi=float(x.get("roi", 0) or 0)
+                        roi=float(x.get("roi", 0) or 0),
                     )
 
                     data.append(res_data)
                     profit_total += profit
                     cost_total += cost
 
-
-            print(params["page"])
-            params["page"] += 1
-            print(len(data))
-
             if len(page_rows) < params["per"]:
                 break
 
+            params["page"] += 1
 
         roi_total = (profit_total / cost_total) if cost_total > 0 else 0.0
 

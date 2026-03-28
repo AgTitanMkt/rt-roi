@@ -14,9 +14,9 @@ def _get_value(obj, key, default=None):
 
 def _empty_summary_payload():
     return {
-        "today": {"cost": 0, "profit": 0, "roi": 0},
-        "yesterday": {"cost": 0, "profit": 0, "roi": 0},
-        "comparison": {"cost_change": 0, "profit_change": 0, "roi_change": 0},
+        "today": {"cost": 0, "profit": 0, "revenue": 0, "roi": 0},
+        "yesterday": {"cost": 0, "profit": 0, "revenue": 0, "roi": 0},
+        "comparison": {"cost_change": 0, "profit_change": 0, "revenue_change": 0, "roi_change": 0},
     }
 
 def get_db():
@@ -65,16 +65,19 @@ def get_summary(
         "today": {
             "cost": float((result.get("today") or {}).get("cost") or 0),
             "profit": float((result.get("today") or {}).get("profit") or 0),
+            "revenue": float((result.get("today") or {}).get("revenue") or 0),
             "roi": float((result.get("today") or {}).get("roi") or 0),
         },
         "yesterday": {
             "cost": float((result.get("yesterday") or {}).get("cost") or 0),
             "profit": float((result.get("yesterday") or {}).get("profit") or 0),
+            "revenue": float((result.get("yesterday") or {}).get("revenue") or 0),
             "roi": float((result.get("yesterday") or {}).get("roi") or 0),
         },
         "comparison": {
             "cost_change": float((result.get("comparison") or {}).get("cost_change") or 0),
             "profit_change": float((result.get("comparison") or {}).get("profit_change") or 0),
+            "revenue_change": float((result.get("comparison") or {}).get("revenue_change") or 0),
             "roi_change": float((result.get("comparison") or {}).get("roi_change") or 0),
         }
     }
@@ -83,7 +86,7 @@ def get_summary(
     "/hourly",
     summary="Retorna métricas por hora",
     description=(
-        "Retorna uma série temporal por hora com custo, lucro e ROI para gráficos.\n\n"
+        "Retorna uma série temporal por hora com custo, lucro e ROI das ultimas 24 horas para gráficos.\n\n"
         "- `source` (opcional): filtra por origem de tráfego.\n"
         "- Sem autenticação no estado atual do projeto."
     ),
@@ -96,15 +99,21 @@ def get_summary(
                 "application/json": {
                     "example": [
                         {
+                            "slot": "2026-03-28T14:00:00",
+                            "day": "today",
                             "hour": "14",
                             "cost": 12.1,
                             "profit": 4.2,
+                            "revenue": 45.0,
                             "roi": 0.35,
                         },
                         {
-                            "hour": "15",
+                            "slot": "2026-03-27T23:00:00",
+                            "day": "yesterday",
+                            "hour": "23",
                             "cost": 10.4,
                             "profit": 3.1,
+                            "revenue": 30.0,
                             "roi": 0.30,
                         },
                     ]
@@ -116,18 +125,22 @@ def get_summary(
 def get_hourly(
     source: str | None = Query(
         default=None,
-        description="Origem de tráfego para filtrar os dados (ex.: mediago)",
-        examples=["mediago"],
+        description="Origem de tráfego para filtrar os dados (ex.: YTD)",
+        examples=["YTD"],
     ),
     db: Session = Depends(get_db)
 ):
     rows = get_hourly_cached(db, source)
+    print(rows)
 
     return [
         {
+            "slot": str(_get_value(row, "slot", "")),
+            "day": str(_get_value(row, "day", "")),
             "hour": str(_get_value(row, "hour", "")),
             "cost": float(_get_value(row, "cost", 0) or 0),
             "profit": float(_get_value(row, "profit", 0) or 0),
+            "revenue": float(_get_value(row, "revenue", 0) or 0),
             "roi": float(_get_value(row, "roi", 0) or 0),
         }
         for row in rows

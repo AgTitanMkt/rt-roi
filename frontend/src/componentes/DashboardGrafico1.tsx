@@ -12,38 +12,75 @@ import {
   ReferenceLine,
 } from "recharts";
 import { RechartsDevtools } from "@recharts/devtools";
-import type { HourlyMetric, SourceOption } from "../utils/reqs.ts";
+import type { HourlyMetric, SquadOption } from "../utils/reqs.ts";
 
 interface DashboardGraficoProps {
   hourlyData: HourlyMetric[];
   isLoading?: boolean;
-  selectedSource: string;
-  sourceOptions: SourceOption[];
-  onSourceChange: (value: string) => void;
+  selectedSquad: string;
+  squadOptions: SquadOption[];
+  onSquadChange: (value: string) => void;
 }
 
 const DashboardGrafico = ({
   hourlyData,
   isLoading = false,
-  selectedSource,
-  sourceOptions,
-  onSourceChange,
+  selectedSquad,
+  squadOptions,
+  onSquadChange,
 }: DashboardGraficoProps) => {
   const dadosUnificados = useMemo(
-    () =>
-      [...hourlyData]
-        .sort((a, b) => Number(a.hour) - Number(b.hour))
-        .map((item) => {
+    () => {
+      const getOrderValue = (item: HourlyMetric): number => {
+        if (item.slot) {
+          const parsed = Date.parse(item.slot);
+          if (!Number.isNaN(parsed)) {
+            return parsed;
+          }
+        }
+
+        return Number(item.hour || 0);
+      };
+
+      const getAxisLabel = (item: HourlyMetric): string => {
+        const hourLabel = String(item.hour).padStart(2, "0");
+        return `${hourLabel}:00`;
+      };
+
+      const getTooltipLabel = (item: HourlyMetric): string => {
+        if (!item.slot) {
+          return getAxisLabel(item);
+        }
+
+        const parsed = new Date(item.slot);
+        if (Number.isNaN(parsed.getTime())) {
+          return item.slot;
+        }
+
+        return parsed.toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      };
+
+      return [...hourlyData]
+        .sort((a, b) => getOrderValue(a) - getOrderValue(b))
+        .map((item, index) => {
           const relacao = Number(item.roi ?? 0);
-          const hourLabel = String(item.hour).padStart(2, "0");
+          const xKey = item.slot || `${item.hour || "00"}-${index}`;
 
           return {
-            label: `${hourLabel}:00`,
-            lucro: Number(item.profit ?? 0),
+            xKey,
+            axisLabel: getAxisLabel(item),
+            tooltipLabel: getTooltipLabel(item),
+            faturamento: Number(item.revenue ?? 0),
             gasto: Number(item.cost ?? 0),
             relacao,
           };
-        }),
+        });
+    },
     [hourlyData],
   );
 
@@ -62,7 +99,12 @@ const DashboardGrafico = ({
 
   const labelsNegativos = dadosUnificados
     .filter((d) => d.relacao < 0)
-    .map((d) => d.label);
+    .map((d) => d.xKey);
+
+  const tooltipLabels = useMemo(
+    () => new Map(dadosUnificados.map((item) => [item.xKey, item.tooltipLabel])),
+    [dadosUnificados],
+  );
 
   return (
     <div
@@ -92,7 +134,7 @@ const DashboardGrafico = ({
           <h2 style={{ fontSize: "clamp(14px, 2.8vw, 16px)", margin: 0 }}>
             Performance Analitica
           </h2>
-          <small style={{ color: "#9ca3af" }}>Ultimas horas</small>
+          <small style={{ color: "#9ca3af" }}>Ultimas 24 horas</small>
         </div>
         <div
           style={{
@@ -109,8 +151,8 @@ const DashboardGrafico = ({
             {isLoading ? "Atualizando..." : `${dadosUnificados.length} pontos`}
           </small>
           <select
-            value={selectedSource}
-            onChange={(event) => onSourceChange(event.target.value)}
+            value={selectedSquad}
+            onChange={(event) => onSquadChange(event.target.value)}
             style={{
               background: "#111827",
               border: "1px solid #374151",
@@ -122,7 +164,7 @@ const DashboardGrafico = ({
               minWidth: "150px",
             }}
           >
-            {sourceOptions.map((option) => (
+            {squadOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -140,7 +182,7 @@ const DashboardGrafico = ({
             fontWeight: "bold",
           }}
         >
-          Gasto, Lucro e ROI Por Hora.
+          Gasto, Faturamento e ROI Por Hora.
         </p>
         {dadosUnificados.length === 0 ? (
           <p style={{ fontSize: "12px", color: "#9ca3af" }}>
@@ -158,7 +200,11 @@ const DashboardGrafico = ({
                 stroke="#1f2937"
               />
               <XAxis
-                dataKey="label"
+                dataKey="xKey"
+                tickFormatter={(value) => {
+                  const entry = dadosUnificados.find((item) => item.xKey === value);
+                  return entry?.axisLabel ?? String(value);
+                }}
                 tick={{ fill: "#9ca3af", fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
@@ -172,6 +218,7 @@ const DashboardGrafico = ({
               <YAxis yAxisId="relacao" hide domain={relacaoDomain} />
               <Tooltip
                 shared={false}
+                labelFormatter={(value) => tooltipLabels.get(String(value)) ?? String(value)}
                 contentStyle={{
                   backgroundColor: "#111827",
                   border: "1px solid #1f2937",
@@ -190,14 +237,14 @@ const DashboardGrafico = ({
                     return [`$${numericValue.toFixed(2)}`, "Gasto"];
                   }
 
-                  return [`$${numericValue.toFixed(2)}`, "Lucro"];
+                  return [`$${numericValue.toFixed(2)}`, "Faturamento"];
                 }}
               />
               <Legend
                 wrapperStyle={{ fontSize: "11px", color: "#9ca3af" }}
                 formatter={(value: string) => {
                   if (value === "gasto") return "Gasto";
-                  if (value === "lucro") return "Lucro";
+                  if (value === "faturamento") return "Faturamento";
                   return "ROI";
                 }}
               />
@@ -210,7 +257,7 @@ const DashboardGrafico = ({
               />
               <Bar
                 yAxisId="valores"
-                dataKey="lucro"
+                dataKey="faturamento"
                 fill="#2563eb"
                 barSize={14}
                 radius={[4, 4, 0, 0]}
@@ -230,7 +277,7 @@ const DashboardGrafico = ({
                 dataKey="relacao"
                 stroke="#22c55e"
                 dot={({ cx, cy, payload }) => {
-                  const isNegative = Number(payload?.relacao ?? 0) < 0;
+                  const isNegative = Number(payload?.relacao ?? 0) < 1;
 
                   return (
                     <circle
