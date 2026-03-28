@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import asyncio
 import sys
@@ -36,6 +36,7 @@ SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
+            "squad": item.squad,
             "metric_at": item.date,
             "cost": item.cost,
             "profit": item.profit,
@@ -59,14 +60,15 @@ def persist_metrics_report(data: RedtrackResponse) -> None:
 
 async def redtrack_reports() -> RedtrackResponse:
     now_sp = datetime.now(SAO_PAULO_TZ)
-    today = now_sp.strftime("%Y-%m-%d")
-    hour = now_sp.hour
+    last_closed_hour = now_sp.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+    date_from = last_closed_hour.strftime("%Y-%m-%d")
+    date_to = now_sp.strftime("%Y-%m-%d")
 
     params = {
         "api_key": REDTRACK_API_KEY,
         "group": "campaign,date",
-        "date_from": today,
-        "date_to": today,
+        "date_from": date_from,
+        "date_to": date_to,
         "time_interval": "lasthour",
         "timezone": "America/Sao_Paulo",
         "per": 1000,
@@ -104,8 +106,16 @@ async def redtrack_reports() -> RedtrackResponse:
                 if not raw_date:
                     continue
 
+                report_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+                if report_date == last_closed_hour.date():
+                    metric_hour = last_closed_hour.hour
+                elif report_date == now_sp.date():
+                    metric_hour = now_sp.hour
+                else:
+                    metric_hour = 0
+
                 report_datetime = datetime.strptime(raw_date, "%Y-%m-%d").replace(
-                    hour=hour,
+                    hour=metric_hour,
                     minute=0,
                     second=0,
                     microsecond=0,
@@ -120,6 +130,7 @@ async def redtrack_reports() -> RedtrackResponse:
                     squad = responsible.split("-")[0]
 
                     res_data = RedtrackReportItem(
+                        squad=squad,
                         date=report_datetime,
                         cost=cost,
                         revenue=float(x.get("revenue", 0) or 0),

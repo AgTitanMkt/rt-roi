@@ -41,6 +41,8 @@ export interface SummaryResponse {
 
 export interface HourlyMetric {
   squad: string;
+  slot: string;
+  day: "today" | "yesterday" | string;
   hour: string;
   cost: number;
   profit: number;

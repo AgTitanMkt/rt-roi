@@ -30,20 +30,37 @@ const DashboardGrafico = ({
   onSquadChange,
 }: DashboardGraficoProps) => {
   const dadosUnificados = useMemo(
-    () =>
-      [...hourlyData]
-        .sort((a, b) => Number(a.hour) - Number(b.hour))
+    () => {
+      const getOrderValue = (item: HourlyMetric): number => {
+        if (item.slot) {
+          const parsed = Date.parse(item.slot);
+          if (!Number.isNaN(parsed)) {
+            return parsed;
+          }
+        }
+
+        return Number(item.hour || 0);
+      };
+
+      const getHourLabel = (item: HourlyMetric): string => {
+        const hourLabel = String(item.hour).padStart(2, "0");
+        const dayPrefix = item.day === "yesterday" ? "Ontem" : "Hoje";
+        return `${dayPrefix} ${hourLabel}:00`;
+      };
+
+      return [...hourlyData]
+        .sort((a, b) => getOrderValue(a) - getOrderValue(b))
         .map((item) => {
           const relacao = Number(item.roi ?? 0);
-          const hourLabel = String(item.hour).padStart(2, "0");
 
           return {
-            label: `${hourLabel}:00`,
+            label: getHourLabel(item),
             faturamento: Number(item.revenue ?? 0),
             gasto: Number(item.cost ?? 0),
             relacao,
           };
-        }),
+        });
+    },
     [hourlyData],
   );
 
@@ -92,7 +109,7 @@ const DashboardGrafico = ({
           <h2 style={{ fontSize: "clamp(14px, 2.8vw, 16px)", margin: 0 }}>
             Performance Analitica
           </h2>
-          <small style={{ color: "#9ca3af" }}>Ultimas horas</small>
+          <small style={{ color: "#9ca3af" }}>Ultimas 24 horas</small>
         </div>
         <div
           style={{

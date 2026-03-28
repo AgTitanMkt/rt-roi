@@ -86,7 +86,7 @@ def get_summary(
     "/hourly",
     summary="Retorna métricas por hora",
     description=(
-        "Retorna uma série temporal por hora com custo, lucro e ROI para gráficos.\n\n"
+        "Retorna uma série temporal por hora com custo, lucro e ROI das ultimas 24 horas para gráficos.\n\n"
         "- `source` (opcional): filtra por origem de tráfego.\n"
         "- Sem autenticação no estado atual do projeto."
     ),
@@ -99,7 +99,8 @@ def get_summary(
                 "application/json": {
                     "example": [
                         {
-                            "squad": "YTD",
+                            "slot": "2026-03-28T14:00:00",
+                            "day": "today",
                             "hour": "14",
                             "cost": 12.1,
                             "profit": 4.2,
@@ -107,8 +108,9 @@ def get_summary(
                             "roi": 0.35,
                         },
                         {
-                            "squad": "YTD",
-                            "hour": "15",
+                            "slot": "2026-03-27T23:00:00",
+                            "day": "yesterday",
+                            "hour": "23",
                             "cost": 10.4,
                             "profit": 3.1,
                             "revenue": 30.0,
@@ -123,16 +125,18 @@ def get_summary(
 def get_hourly(
     source: str | None = Query(
         default=None,
-        description="Origem de tráfego para filtrar os dados (ex.: mediago)",
-        examples=["mediago"],
+        description="Origem de tráfego para filtrar os dados (ex.: YTD)",
+        examples=["YTD"],
     ),
     db: Session = Depends(get_db)
 ):
     rows = get_hourly_cached(db, source)
+    print(rows)
 
     return [
         {
-            "squad": str(_get_value(row, "squad", "")),
+            "slot": str(_get_value(row, "slot", "")),
+            "day": str(_get_value(row, "day", "")),
             "hour": str(_get_value(row, "hour", "")),
             "cost": float(_get_value(row, "cost", 0) or 0),
             "profit": float(_get_value(row, "profit", 0) or 0),

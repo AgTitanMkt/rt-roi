@@ -16,7 +16,11 @@ def _normalize_source(source):
     if source is None:
         return None
     normalized = source.strip()
-    return normalized or None
+    if not normalized:
+        return None
+    if normalized.lower() in {"all", "todos", "todos os squads"}:
+        return None
+    return normalized
 
 
 def _to_jsonable(value):
@@ -33,6 +37,13 @@ def _is_summary_payload(payload):
     return isinstance(payload, dict) and {"today", "yesterday", "comparison"}.issubset(payload.keys())
 
 
+def _is_hourly_payload(payload):
+    if not isinstance(payload, list):
+        return False
+    required_keys = {"slot", "day", "hour", "cost", "profit", "revenue", "roi"}
+    return all(isinstance(item, dict) and required_keys.issubset(item.keys()) for item in payload)
+
+
 def _hourly_to_list(rows):
     result = []
     for row in rows or []:
@@ -40,6 +51,8 @@ def _hourly_to_list(rows):
         result.append(
             {
                 "squad": str(mapping.get("squad") or ""),
+                "slot": str(mapping.get("slot") or ""),
+                "day": str(mapping.get("day") or ""),
                 "hour": str(mapping.get("hour") or ""),
                 "cost": float(mapping.get("cost") or 0),
                 "profit": float(mapping.get("profit") or 0),
@@ -94,10 +107,10 @@ def get_summary_cached(db, source=None):
 
 def get_hourly_cached(db, source=None):
     source = _normalize_source(source)
-    cache_key = f"hourly:{source or 'all'}"
+    cache_key = f"hourly:v2:{source or 'all'}"
 
     cached = _cache_get(cache_key)
-    if cached is not None:
+    if _is_hourly_payload(cached):
         return cached
 
     data = get_metrics_by_hour(db, source)
