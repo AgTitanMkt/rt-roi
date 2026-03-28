@@ -42,19 +42,39 @@ const DashboardGrafico = ({
         return Number(item.hour || 0);
       };
 
-      const getHourLabel = (item: HourlyMetric): string => {
+      const getAxisLabel = (item: HourlyMetric): string => {
         const hourLabel = String(item.hour).padStart(2, "0");
-        const dayPrefix = item.day === "yesterday" ? "Ontem" : "Hoje";
-        return `${dayPrefix} ${hourLabel}:00`;
+        return `${hourLabel}:00`;
+      };
+
+      const getTooltipLabel = (item: HourlyMetric): string => {
+        if (!item.slot) {
+          return getAxisLabel(item);
+        }
+
+        const parsed = new Date(item.slot);
+        if (Number.isNaN(parsed.getTime())) {
+          return item.slot;
+        }
+
+        return parsed.toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
       };
 
       return [...hourlyData]
         .sort((a, b) => getOrderValue(a) - getOrderValue(b))
-        .map((item) => {
+        .map((item, index) => {
           const relacao = Number(item.roi ?? 0);
+          const xKey = item.slot || `${item.hour || "00"}-${index}`;
 
           return {
-            label: getHourLabel(item),
+            xKey,
+            axisLabel: getAxisLabel(item),
+            tooltipLabel: getTooltipLabel(item),
             faturamento: Number(item.revenue ?? 0),
             gasto: Number(item.cost ?? 0),
             relacao,
@@ -79,7 +99,12 @@ const DashboardGrafico = ({
 
   const labelsNegativos = dadosUnificados
     .filter((d) => d.relacao < 0)
-    .map((d) => d.label);
+    .map((d) => d.xKey);
+
+  const tooltipLabels = useMemo(
+    () => new Map(dadosUnificados.map((item) => [item.xKey, item.tooltipLabel])),
+    [dadosUnificados],
+  );
 
   return (
     <div
@@ -175,7 +200,11 @@ const DashboardGrafico = ({
                 stroke="#1f2937"
               />
               <XAxis
-                dataKey="label"
+                dataKey="xKey"
+                tickFormatter={(value) => {
+                  const entry = dadosUnificados.find((item) => item.xKey === value);
+                  return entry?.axisLabel ?? String(value);
+                }}
                 tick={{ fill: "#9ca3af", fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
@@ -189,6 +218,7 @@ const DashboardGrafico = ({
               <YAxis yAxisId="relacao" hide domain={relacaoDomain} />
               <Tooltip
                 shared={false}
+                labelFormatter={(value) => tooltipLabels.get(String(value)) ?? String(value)}
                 contentStyle={{
                   backgroundColor: "#111827",
                   border: "1px solid #1f2937",
