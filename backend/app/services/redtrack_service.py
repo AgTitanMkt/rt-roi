@@ -106,16 +106,9 @@ async def redtrack_reports() -> RedtrackResponse:
                 if not raw_date:
                     continue
 
-                report_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
-                if report_date == last_closed_hour.date():
-                    metric_hour = last_closed_hour.hour
-                elif report_date == now_sp.date():
-                    metric_hour = now_sp.hour
-                else:
-                    metric_hour = 0
-
                 report_datetime = datetime.strptime(raw_date, "%Y-%m-%d").replace(
-                    hour=metric_hour,
+                    # lasthour sempre representa a ultima hora fechada na timezone configurada.
+                    hour=last_closed_hour.hour,
                     minute=0,
                     second=0,
                     microsecond=0,
