@@ -14,6 +14,8 @@ import {
 import { RechartsDevtools } from "@recharts/devtools";
 import type { HourlyMetric, SquadOption } from "../utils/reqs.ts";
 
+const MAX_CHART_POINTS = 24;
+
 interface DashboardGraficoProps {
   hourlyData: HourlyMetric[];
   isLoading?: boolean;
@@ -31,9 +33,20 @@ const DashboardGrafico = ({
 }: DashboardGraficoProps) => {
   const dadosUnificados = useMemo(
     () => {
+      const shiftHourForward = (hourValue: string | number | null | undefined): number => {
+        const parsedHour = Number(hourValue ?? 0);
+
+        if (Number.isNaN(parsedHour)) {
+          return 0;
+        }
+
+        return (parsedHour + 1 + 24) % 24;
+      };
+
       const getOrderValue = (item: HourlyMetric): number => {
         if (item.slot) {
           const parsed = Date.parse(item.slot);
+
           if (!Number.isNaN(parsed)) {
             return parsed;
           }
@@ -43,7 +56,7 @@ const DashboardGrafico = ({
       };
 
       const getAxisLabel = (item: HourlyMetric): string => {
-        const hourLabel = String(item.hour).padStart(2, "0");
+        const hourLabel = String(shiftHourForward(item.hour)).padStart(2, "0");
         return `${hourLabel}:00`;
       };
 
@@ -57,6 +70,8 @@ const DashboardGrafico = ({
           return item.slot;
         }
 
+        parsed.setHours(parsed.getHours() + 1);
+
         return parsed.toLocaleString("pt-BR", {
           day: "2-digit",
           month: "2-digit",
@@ -67,9 +82,11 @@ const DashboardGrafico = ({
 
       return [...hourlyData]
         .sort((a, b) => getOrderValue(a) - getOrderValue(b))
+        .slice(0, MAX_CHART_POINTS)
         .map((item, index) => {
           const relacao = Number(item.roi ?? 0);
-          const xKey = item.slot || `${item.hour || "00"}-${index}`;
+          const shiftedHour = String(shiftHourForward(item.hour)).padStart(2, "0");
+          const xKey = item.slot || `${shiftedHour}-${index}`;
 
           return {
             xKey,
@@ -93,7 +110,7 @@ const DashboardGrafico = ({
   const relacaoSpan = Math.max(relacaoBaseMax - relacaoBaseMin, 1);
   // Empurra o piso do eixo para baixo para manter a linha de ROI no topo visual.
   const relacaoDomain: [number, number] = [
-    relacaoBaseMin - relacaoSpan * 2,
+    relacaoBaseMin - relacaoSpan * 3,
     relacaoBaseMax,
   ];
 
