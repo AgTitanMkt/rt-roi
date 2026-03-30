@@ -14,6 +14,8 @@ import {
 import { RechartsDevtools } from "@recharts/devtools";
 import type { HourlyMetric, SquadOption } from "../utils/reqs.ts";
 
+const MAX_CHART_POINTS = 24;
+
 interface DashboardGraficoProps {
   hourlyData: HourlyMetric[];
   isLoading?: boolean;
@@ -80,6 +82,7 @@ const DashboardGrafico = ({
 
       return [...hourlyData]
         .sort((a, b) => getOrderValue(a) - getOrderValue(b))
+        .slice(0, MAX_CHART_POINTS)
         .map((item, index) => {
           const relacao = Number(item.roi ?? 0);
           const shiftedHour = String(shiftHourForward(item.hour)).padStart(2, "0");
