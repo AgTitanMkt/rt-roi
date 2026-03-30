@@ -196,25 +196,34 @@ def get_metrics_by_hour(db: Session, source: str = None):
     sp_yesterday = sp_today - timedelta(days=1)
 
     query = """
-        SELECT
-            CASE WHEN :source IS NULL THEN NULL::text ELSE :source END as squad,
-            to_char(date_trunc('hour', timezone('America/Sao_Paulo', metric_at)), 'YYYY-MM-DD"T"HH24:00:00') as slot,
-            CASE
-                WHEN timezone('America/Sao_Paulo', metric_at)::date = :sp_today THEN 'today'
-                ELSE 'yesterday'
-            END as day,
-            EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
-            SUM(cost) as cost,
-            SUM(profit) as profit,
-            SUM(revenue) as revenue,
-            ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
-        FROM tb_metrics_snapshots
-        WHERE timezone('America/Sao_Paulo', metric_at)::date IN (:sp_today, :sp_yesterday)
-          AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
-        GROUP BY
-            date_trunc('hour', timezone('America/Sao_Paulo', metric_at)),
-            timezone('America/Sao_Paulo', metric_at)::date,
-            EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))
+        WITH hourly AS (
+            SELECT
+                CASE WHEN :source IS NULL THEN NULL::text ELSE :source END as squad,
+                to_char(date_trunc('hour', timezone('America/Sao_Paulo', metric_at)), 'YYYY-MM-DD"T"HH24:00:00') as slot,
+                CASE
+                    WHEN timezone('America/Sao_Paulo', metric_at)::date = :sp_today THEN 'today'
+                    ELSE 'yesterday'
+                END as day,
+                EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
+                SUM(cost) as cost,
+                SUM(profit) as profit,
+                SUM(revenue) as revenue,
+                ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
+            FROM tb_metrics_snapshots
+            WHERE timezone('America/Sao_Paulo', metric_at)::date IN (:sp_today, :sp_yesterday)
+              AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+            GROUP BY
+                date_trunc('hour', timezone('America/Sao_Paulo', metric_at)),
+                timezone('America/Sao_Paulo', metric_at)::date,
+                EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))
+        )
+        SELECT *
+        FROM (
+            SELECT *
+            FROM hourly
+            ORDER BY slot DESC
+            LIMIT 24
+        ) latest
         ORDER BY slot
     """
 
