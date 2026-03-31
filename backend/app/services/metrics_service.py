@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
-from ..models.metrics import DailySummary, HourlyMetric
+from ..models.metrics import DailySummary, HourlyMetric, DailyCheckoutSummary, DailyProductSummary
 
 
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
@@ -421,4 +421,166 @@ def get_metrics_by_period(db: Session, period: str = "24h", source: str = None):
     
     # Reverter ordem para crescente (mais antigo primeiro)
     return list(reversed(rows)) if rows else []
+
+
+def get_checkout_summary(db: Session, squad: str = None, period: str = "24h"):
+    """
+    Retorna métricas de conversão por checkout (Cartpanda, Clickbank).
+    """
+    sp_today = datetime.now(SAO_PAULO_TZ).date()
+    
+    if period == "weekly":
+        date_start = sp_today - timedelta(days=6)
+        date_end = sp_today
+    elif period == "monthly":
+        date_start = sp_today - timedelta(days=29)
+        date_end = sp_today
+    else:  # 24h ou daily
+        date_start = sp_today
+        date_end = sp_today
+    
+    query = """
+        SELECT
+            checkout,
+            SUM(initiate_checkout) as initiate_checkout,
+            SUM(purchase) as purchase,
+            CASE 
+                WHEN SUM(initiate_checkout) > 0 
+                THEN ROUND((SUM(purchase)::numeric / SUM(initiate_checkout)) * 100, 2)
+                ELSE 0 
+            END as checkout_conversion
+        FROM tb_daily_checkout_summary
+        WHERE metric_date BETWEEN :date_start AND :date_end
+          AND checkout != 'unknown'
+    """
+    
+    params: dict[str, object] = {
+        "date_start": date_start,
+        "date_end": date_end,
+    }
+    
+    if squad:
+        query += " AND (UPPER(squad) = UPPER(:squad) OR squad = 'ALL')"
+        params["squad"] = squad
+    
+    query += " GROUP BY checkout ORDER BY checkout_conversion DESC"
+    
+    result = db.execute(text(query), params)
+    rows = result.fetchall()
+    
+    return [
+        {
+            "checkout": row.checkout,
+            "initiate_checkout": int(row.initiate_checkout or 0),
+            "purchase": int(row.purchase or 0),
+            "checkout_conversion": float(row.checkout_conversion or 0),
+        }
+        for row in rows
+    ]
+
+
+def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
+    """
+    Retorna métricas de conversão por produto.
+    """
+    sp_today = datetime.now(SAO_PAULO_TZ).date()
+    
+    if period == "weekly":
+        date_start = sp_today - timedelta(days=6)
+        date_end = sp_today
+    elif period == "monthly":
+        date_start = sp_today - timedelta(days=29)
+        date_end = sp_today
+    else:  # 24h ou daily
+        date_start = sp_today
+        date_end = sp_today
+    
+    query = """
+        SELECT
+            product,
+            SUM(initiate_checkout) as initiate_checkout,
+            SUM(purchase) as purchase,
+            CASE 
+                WHEN SUM(initiate_checkout) > 0 
+                THEN ROUND((SUM(purchase)::numeric / SUM(initiate_checkout)) * 100, 2)
+                ELSE 0 
+            END as checkout_conversion
+        FROM tb_daily_product_summary
+        WHERE metric_date BETWEEN :date_start AND :date_end
+          AND product != 'unknown'
+    """
+    
+    params: dict[str, object] = {
+        "date_start": date_start,
+        "date_end": date_end,
+    }
+    
+    if squad:
+        query += " AND (UPPER(squad) = UPPER(:squad) OR squad = 'ALL')"
+        params["squad"] = squad
+    
+    query += " GROUP BY product ORDER BY checkout_conversion DESC"
+    
+    result = db.execute(text(query), params)
+    rows = result.fetchall()
+    
+    return [
+        {
+            "product": row.product,
+            "initiate_checkout": int(row.initiate_checkout or 0),
+            "purchase": int(row.purchase or 0),
+            "checkout_conversion": float(row.checkout_conversion or 0),
+        }
+        for row in rows
+    ]
+
+
+def get_squad_checkout_summary(db: Session, period: str = "24h"):
+    """
+    Retorna métricas de conversão por checkout e squad.
+    """
+    sp_today = datetime.now(SAO_PAULO_TZ).date()
+    
+    if period == "weekly":
+        date_start = sp_today - timedelta(days=6)
+        date_end = sp_today
+    elif period == "monthly":
+        date_start = sp_today - timedelta(days=29)
+        date_end = sp_today
+    else:
+        date_start = sp_today
+        date_end = sp_today
+    
+    # Obter dados por squad de tb_daily_metrics_summary
+    query = """
+        SELECT
+            squad,
+            SUM(cost) as cost,
+            SUM(profit) as profit,
+            SUM(revenue) as revenue,
+            ROUND(AVG(checkout_conversion), 2) as checkout_conversion,
+            ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
+        FROM tb_daily_metrics_summary
+        WHERE metric_date BETWEEN :date_start AND :date_end
+          AND squad != 'unknown'
+        GROUP BY squad
+        ORDER BY profit DESC
+    """
+    
+    params = {"date_start": date_start, "date_end": date_end}
+    result = db.execute(text(query), params)
+    rows = result.fetchall()
+    
+    return [
+        {
+            "squad": row.squad,
+            "cost": float(row.cost or 0),
+            "profit": float(row.profit or 0),
+            "revenue": float(row.revenue or 0),
+            "checkout_conversion": float(row.checkout_conversion or 0),
+            "roi": float(row.roi or 0),
+        }
+        for row in rows
+    ]
+
 
