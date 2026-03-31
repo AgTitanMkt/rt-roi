@@ -53,6 +53,29 @@ export interface HourlyMetric {
   roi: number;
 }
 
+export interface CheckoutMetric {
+  checkout: string;
+  initiate_checkout: number;
+  purchase: number;
+  checkout_conversion: number;
+}
+
+export interface ProductMetric {
+  product: string;
+  initiate_checkout: number;
+  purchase: number;
+  checkout_conversion: number;
+}
+
+export interface SquadMetric {
+  squad: string;
+  cost: number;
+  profit: number;
+  revenue: number;
+  checkout_conversion: number;
+  roi: number;
+}
+
 interface HealthResponse {
   status: string;
 }
@@ -66,6 +89,9 @@ interface UseDashboardDataParams {
 interface UseDashboardDataResult {
   summary: SummaryResponse | null;
   hourly: HourlyMetric[];
+  checkouts: CheckoutMetric[];
+  products: ProductMetric[];
+  squads: SquadMetric[];
   isHealthy: boolean;
   isLoading: boolean;
   error: string | null;
@@ -118,6 +144,20 @@ export const fetchHourly = (squad?: string, period: string = "24h"): Promise<Hou
   return fetchJson<HourlyMetric[]>(withSquad(path, squad));
 };
 
+export const fetchCheckoutMetrics = (squad?: string, period: string = "24h"): Promise<CheckoutMetric[]> => {
+  const path = `/metrics/by-checkout?period=${period}`;
+  return fetchJson<CheckoutMetric[]>(withSquad(path, squad));
+};
+
+export const fetchProductMetrics = (squad?: string, period: string = "24h"): Promise<ProductMetric[]> => {
+  const path = `/metrics/by-product?period=${period}`;
+  return fetchJson<ProductMetric[]>(withSquad(path, squad));
+};
+
+export const fetchSquadMetrics = (period: string = "24h"): Promise<SquadMetric[]> => {
+  return fetchJson<SquadMetric[]>(`/metrics/by-squad?period=${period}`);
+};
+
 export const checkBackendHealth = async (): Promise<boolean> => {
   const health = await fetchJson<HealthResponse>("/health");
   return health.status === "ok";
@@ -130,6 +170,9 @@ export const useDashboardData = ({
 }: UseDashboardDataParams = {}): UseDashboardDataResult => {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [hourly, setHourly] = useState<HourlyMetric[]>([]);
+  const [checkouts, setCheckouts] = useState<CheckoutMetric[]>([]);
+  const [products, setProducts] = useState<ProductMetric[]>([]);
+  const [squads, setSquads] = useState<SquadMetric[]>([]);
   const [isHealthy, setIsHealthy] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,9 +186,12 @@ export const useDashboardData = ({
       const healthy = await checkBackendHealth().catch(() => false);
       setIsHealthy(healthy);
 
-      const [summaryResult, hourlyResult] = await Promise.allSettled([
+      const [summaryResult, hourlyResult, checkoutsResult, productsResult, squadsResult] = await Promise.allSettled([
         fetchSummary(squad),
         fetchHourly(squad, period),
+        fetchCheckoutMetrics(squad, period),
+        fetchProductMetrics(squad, period),
+        fetchSquadMetrics(period),
       ]);
 
       const errors: string[] = [];
@@ -162,6 +208,24 @@ export const useDashboardData = ({
         // Mantem cards funcionando quando grafico falha.
         setHourly([]);
         errors.push("Falha ao atualizar grafico (hourly)");
+      }
+
+      if (checkoutsResult.status === "fulfilled") {
+        setCheckouts(checkoutsResult.value);
+      } else {
+        setCheckouts([]);
+      }
+
+      if (productsResult.status === "fulfilled") {
+        setProducts(productsResult.value);
+      } else {
+        setProducts([]);
+      }
+
+      if (squadsResult.status === "fulfilled") {
+        setSquads(squadsResult.value);
+      } else {
+        setSquads([]);
       }
 
       if (errors.length > 0) {
@@ -192,6 +256,9 @@ export const useDashboardData = ({
   return {
     summary,
     hourly,
+    checkouts,
+    products,
+    squads,
     isHealthy,
     isLoading,
     error,
