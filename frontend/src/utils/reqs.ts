@@ -85,7 +85,13 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   console.log(`[API] GET ${fullUrl}`);
 
   try {
-    const response = await fetch(fullUrl);
+    const response = await fetch(fullUrl, {
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+    });
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -132,18 +138,38 @@ export const useDashboardData = ({
     setIsLoading(true);
 
     try {
-      const [healthy, summaryData, hourlyData] = await Promise.all([
-        checkBackendHealth(),
+      const healthy = await checkBackendHealth().catch(() => false);
+      setIsHealthy(healthy);
+
+      const [summaryResult, hourlyResult] = await Promise.allSettled([
         fetchSummary(squad),
         fetchHourly(squad, period),
       ]);
 
-      setIsHealthy(healthy);
-      setSummary(summaryData);
-      setHourly(hourlyData);
-      setLastUpdated(Date.now());
+      const errors: string[] = [];
+
+      if (summaryResult.status === "fulfilled") {
+        setSummary(summaryResult.value);
+      } else {
+        errors.push("Falha ao atualizar cards (summary)");
+      }
+
+      if (hourlyResult.status === "fulfilled") {
+        setHourly(hourlyResult.value);
+      } else {
+        // Mantem cards funcionando quando grafico falha.
+        setHourly([]);
+        errors.push("Falha ao atualizar grafico (hourly)");
+      }
+
+      if (errors.length > 0) {
+        setError(errors.join(" | "));
+      }
+
+      if (summaryResult.status === "fulfilled" || hourlyResult.status === "fulfilled") {
+        setLastUpdated(Date.now());
+      }
     } catch (err) {
-      setIsHealthy(false);
       const message = err instanceof Error ? err.message : "Erro desconhecido";
       setError(message);
     } finally {

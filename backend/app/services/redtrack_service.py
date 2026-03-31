@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from decimal import Decimal, ROUND_HALF_UP
 import os
 import asyncio
 import sys
@@ -27,7 +28,9 @@ RATE_LIMIT_DELAY = 0.5  # 500ms between requests
 
 try:
     from ..core.database import SessionLocal
-    from .metrics_service import insert_metrics
+    from ..models.metrics import DailySummary
+    from .metrics_service import insert_metrics, get_summary as get_summary_metrics
+    from .redis_service import invalidate_metrics_cache
     from ..schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 except ImportError:
     current = Path(__file__).resolve()
@@ -38,7 +41,9 @@ except ImportError:
             sys.path.insert(0, path)
 
     from app.core.database import SessionLocal
-    from app.services.metrics_service import insert_metrics
+    from app.models.metrics import DailySummary
+    from app.services.metrics_service import insert_metrics, get_summary as get_summary_metrics
+    from app.services.redis_service import invalidate_metrics_cache
     from app.schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 
 load_dotenv(find_dotenv(usecwd=True))
@@ -46,6 +51,155 @@ load_dotenv(find_dotenv(usecwd=True))
 REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
 REDTRACK_REPORT_URL = "https://api.redtrack.io/report"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def _q2(value: float | Decimal) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _q4(value: float | Decimal) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def _extract_squad_from_campaign_name(campaign_name: str) -> str:
+    parts = [part.strip() for part in str(campaign_name or "").split("|") if part.strip()]
+    responsible = parts[1] if len(parts) > 1 else (parts[0] if parts else "unknown")
+    return (responsible.split("-")[0] or "unknown").strip() or "unknown"
+
+
+async def _fetch_daily_summary_rows(
+    client: httpx.AsyncClient,
+    *,
+    target_date: str,
+) -> list[dict]:
+    """
+    Fetches day-level cumulative summary rows from Redtrack in a dedicated request.
+    This is intentionally separate from hourly ingestion request.
+    """
+    params = {
+        "api_key": REDTRACK_API_KEY,
+        "group": "campaign,date",
+        "date_from": target_date,
+        "date_to": target_date,
+        "timezone": "America/Sao_Paulo",
+        "per": 1000,
+        "page": 1,
+    }
+
+    rows_acc: list[dict] = []
+    while True:
+        rows = await _make_request_with_retry(client, REDTRACK_REPORT_URL, params)
+        if not isinstance(rows, list):
+            raise RuntimeError("Resposta inesperada da API Redtrack para summary diario.")
+
+        rows_acc.extend(rows)
+        if len(rows) < params["per"]:
+            break
+        params["page"] += 1
+
+    return rows_acc
+
+
+def _persist_daily_summary_snapshot(rows: list[dict], metric_date: date) -> None:
+    if not rows:
+        return
+
+    by_squad: dict[str, dict[str, Decimal]] = {}
+    for row in rows:
+        squad = _extract_squad_from_campaign_name(str(row.get("campaign") or ""))
+        if squad not in by_squad:
+            by_squad[squad] = {
+                "cost": Decimal("0"),
+                "profit": Decimal("0"),
+                "revenue": Decimal("0"),
+            }
+
+        by_squad[squad]["cost"] += _q2(float(row.get("cost", 0) or 0))
+        by_squad[squad]["profit"] += _q2(float(row.get("profit", 0) or 0))
+        by_squad[squad]["revenue"] += _q2(float(row.get("revenue", 0) or 0))
+
+    db = SessionLocal()
+    try:
+        for squad, agg in by_squad.items():
+            cost = _q2(agg["cost"])
+            profit = _q2(agg["profit"])
+            revenue = _q2(agg["revenue"])
+            roi = _q4((profit / cost) if cost > 0 else 0)
+
+            existing = db.query(DailySummary).filter(
+                DailySummary.metric_date == metric_date,
+                DailySummary.squad == squad,
+            ).one_or_none()
+
+            if existing:
+                existing.cost = cost
+                existing.profit = profit
+                existing.revenue = revenue
+                existing.roi = roi
+            else:
+                db.add(
+                    DailySummary(
+                        metric_date=metric_date,
+                        squad=squad,
+                        cost=cost,
+                        profit=profit,
+                        revenue=revenue,
+                        roi=roi,
+                        checkout_conversion=_q2(0),
+                    )
+                )
+
+        db.commit()
+        total_cost = _q2(sum((values["cost"] for values in by_squad.values()), Decimal("0")))
+        total_profit = _q2(sum((values["profit"] for values in by_squad.values()), Decimal("0")))
+        total_revenue = _q2(sum((values["revenue"] for values in by_squad.values()), Decimal("0")))
+        total_roi = _q4((total_profit / total_cost) if total_cost > 0 else 0)
+        logger.info("✅ Snapshot diário salvo: %s squads para %s", len(by_squad), metric_date)
+        logger.info(
+            "📌 SUMMARY DIÁRIO (base dos cards) %s | cost=%s revenue=%s profit=%s roi=%s",
+            metric_date,
+            f"{total_cost:.2f}",
+            f"{total_revenue:.2f}",
+            f"{total_profit:.2f}",
+            f"{total_roi:.4f}",
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _log_cards_preview() -> None:
+    """Loga exatamente os números esperados para os cards (today/yesterday)."""
+    db = SessionLocal()
+    try:
+        summary = get_summary_metrics(db, None, "24h")
+        today = (summary or {}).get("today") or {}
+        yesterday = (summary or {}).get("yesterday") or {}
+        comparison = (summary or {}).get("comparison") or {}
+
+        logger.info(
+            "🧾 CARDS PREVIEW | today(cost=%s revenue=%s profit=%s roi=%s) | "
+            "yesterday(cost=%s revenue=%s profit=%s roi=%s)",
+            f"{float(today.get('cost') or 0):.2f}",
+            f"{float(today.get('revenue') or 0):.2f}",
+            f"{float(today.get('profit') or 0):.2f}",
+            f"{float(today.get('roi') or 0):.4f}",
+            f"{float(yesterday.get('cost') or 0):.2f}",
+            f"{float(yesterday.get('revenue') or 0):.2f}",
+            f"{float(yesterday.get('profit') or 0):.2f}",
+            f"{float(yesterday.get('roi') or 0):.4f}",
+        )
+        logger.info(
+            "🧾 CARDS PREVIEW COMPARISON | cost_change=%s%% revenue_change=%s%% profit_change=%s%% roi_change=%s%%",
+            f"{float(comparison.get('cost_change') or 0):.2f}",
+            f"{float(comparison.get('revenue_change') or 0):.2f}",
+            f"{float(comparison.get('profit_change') or 0):.2f}",
+            f"{float(comparison.get('roi_change') or 0):.2f}",
+        )
+    finally:
+        db.close()
 
 
 async def _make_request_with_retry(
@@ -315,7 +469,7 @@ async def redtrack_reports() -> RedtrackResponse:
     logger.info(f"⏰ Hora fechada anterior: {last_closed_hour.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info(f"📅 Período de busca: {date_from} a {date_to}")
 
-    params = {
+    params_hourly = {
         "api_key": REDTRACK_API_KEY,
         "group": "campaign,date",
         "date_from": date_from,
@@ -330,29 +484,15 @@ async def redtrack_reports() -> RedtrackResponse:
         logger.error("❌ REDTRACK_API_KEY não definida no .env")
         raise RuntimeError("REDTRACK_API_KEY nao encontrada. Defina no .env antes de executar.")
 
-    params = dict(params)
-    params["page"] = 1
+    params_hourly = dict(params_hourly)
+    params_hourly["page"] = 1
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # Step 1: Fetch conversion events (InitiateCheckout + Purchase) once
+        # Step 1: Fetch main report data (independente da conversão)
         logger.info("")
-        logger.info("📌 ETAPA 1: Buscando eventos de conversão...")
-        events_by_campaign = await _fetch_all_events(
-            client,
-            date_from=date_from,
-            date_to=date_to,
-        )
-        
-        # Step 2: Calculate conversions from fetched events
-        logger.info("")
-        logger.info("📌 ETAPA 2: Calculando conversões...")
-        conversions = await _calculate_conversions(events_by_campaign)
-        logger.info(f"✅ {len(conversions)} campanhas com conversão calculada")
-        
-        # Step 3: Fetch main report data
-        logger.info("")
-        logger.info("📌 ETAPA 3: Buscando dados de campanhas...")
+        logger.info("📌 ETAPA 1: Buscando dados principais de campanhas...")
         data: RedtrackResponse = []
+        campaign_ids_seen: set[str] = set()
         cost_total = 0.0
         profit_total = 0.0
         page_count = 0
@@ -364,7 +504,7 @@ async def redtrack_reports() -> RedtrackResponse:
             page_rows = await _make_request_with_retry(
                 client,
                 REDTRACK_REPORT_URL,
-                params,
+                params_hourly,
             )
 
             if not isinstance(page_rows, list):
@@ -400,8 +540,8 @@ async def redtrack_reports() -> RedtrackResponse:
 
                 campaign_parts = [part.strip() for part in campaign_name.split("|") if part.strip()]
 
-                # Use pre-calculated conversion
-                conversion = conversions.get(campaign_id, 0.0)
+                # Conversion é preenchida na etapa separada abaixo.
+                conversion = 0.0
                     
                 responsible = campaign_parts[1] if len(campaign_parts) > 1 else (campaign_parts[0] if campaign_parts else "unknown")
                 squad = responsible.split("-")[0]
@@ -418,16 +558,44 @@ async def redtrack_reports() -> RedtrackResponse:
                 )
 
                 data.append(res_data)
+                campaign_ids_seen.add(campaign_id)
                 profit_total += profit
                 cost_total += cost
                 
                 logger.debug(f"   [{idx}/{len(page_rows)}] {campaign_id} | squad={squad} | cost={cost:.2f} | profit={profit:.2f} | roi={x.get('roi', 0):.2f} | conversion={conversion:.4f}")
 
-            if len(page_rows) < params["per"]:
+            if len(page_rows) < params_hourly["per"]:
                 logger.info(f"✅ Fim da paginação atingido (página {page_count})")
                 break
 
-            params["page"] += 1
+            params_hourly["page"] += 1
+
+        # Step 2: Fetch conversion data via independent Redtrack request.
+        conversions: dict[str, float] = {}
+        logger.info("")
+        logger.info("📌 ETAPA 2: Buscando conversões em requisição separada...")
+        try:
+            events_by_campaign = await _fetch_all_events(
+                client,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            conversions = await _calculate_conversions(events_by_campaign)
+            logger.info(f"✅ {len(conversions)} campanhas com conversão calculada")
+        except Exception as exc:
+            logger.error(
+                "❌ Falha ao buscar conversões no Redtrack: %s. "
+                "Continuando ingestão de custo/receita/lucro sem bloquear persistência.",
+                exc,
+            )
+
+        if conversions:
+            data = [
+                item.model_copy(update={"conversion": conversions.get(item.campaign_id, 0.0)})
+                if item.campaign_id in campaign_ids_seen
+                else item
+                for item in data
+            ]
 
         roi_total = (profit_total / cost_total) if cost_total > 0 else 0.0
 
@@ -444,6 +612,30 @@ async def redtrack_reports() -> RedtrackResponse:
         logger.info("")
 
         persist_metrics_report(data)
+
+        # Step 3: Fetch day summary in separate Redtrack request for cards accuracy.
+        # NOTE: Keep this AFTER persist_metrics_report, because insert_metrics refreshes
+        # tb_daily_metrics_summary from hourly data and could overwrite Redtrack day snapshot.
+        logger.info("")
+        logger.info("📌 ETAPA 3: Buscando summary diário em requisição separada...")
+        try:
+            target_day = now_sp.strftime("%Y-%m-%d")
+            summary_rows = await _fetch_daily_summary_rows(client, target_date=target_day)
+            _persist_daily_summary_snapshot(summary_rows, now_sp.date())
+            _log_cards_preview()
+        except Exception as exc:
+            logger.error(
+                "❌ Falha ao atualizar snapshot diário no Redtrack: %s. "
+                "Mantendo persistência horária sem bloqueio.",
+                exc,
+            )
+
+        # Keep frontend cards/graph aligned with newest DB snapshot immediately.
+        try:
+            cleared = invalidate_metrics_cache()
+            logger.info("🧹 Cache Redis invalidado: %s chaves", cleared)
+        except Exception as exc:
+            logger.warning("⚠️ Falha ao invalidar cache Redis: %s", exc)
         
         logger.info("=" * 80)
         logger.info("✅ SINCRONIZAÇÃO CONCLUÍDA COM SUCESSO!")

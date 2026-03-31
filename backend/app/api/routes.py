@@ -49,6 +49,11 @@ def get_db():
     },
 )
 def get_summary(
+        period: str = Query(
+            default="24h",
+            description="Período: 24h, daily, weekly, monthly",
+            examples=["24h", "daily", "weekly", "monthly"],
+        ),
         source: str | None = Query(
             default=None,
             description="Origem de tráfego para filtrar os dados (ex.: mediago)",
@@ -56,7 +61,7 @@ def get_summary(
         ),
         db: Session = Depends(get_db)
 ):
-    result = get_summary_cached(db, source)
+    result = get_summary_cached(db, source, period)
 
     if not isinstance(result, dict) or "today" not in result:
         result = _empty_summary_payload()
