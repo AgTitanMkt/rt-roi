@@ -5,7 +5,14 @@ import httpx
 
 from ..redis_service import invalidate_metrics_cache
 from ...schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
-from .conversions import calculate_conversions, fetch_all_events
+from .conversions import (
+    calculate_conversions, 
+    fetch_all_events, 
+    fetch_all_conversions,
+    get_conversion_rates_by_campaign,
+    extract_campaign_info,
+    AggregatedConversions,
+)
 from .daily_summary import fetch_daily_summary_rows, log_cards_preview, persist_daily_summary_snapshot
 from .http_client import make_request_with_retry
 from .persistence import persist_metrics_report
@@ -82,13 +89,14 @@ async def redtrack_reports() -> RedtrackResponse:
                     tzinfo=SAO_PAULO_TZ,
                 )
 
-                parts = [part.strip() for part in campaign_name.split("|") if part.strip()]
-                responsible = parts[1] if len(parts) > 1 else (parts[0] if parts else "unknown")
-                squad = responsible.split("-")[0]
+                # Extrair informações da campanha usando a função padronizada
+                campaign_info = extract_campaign_info(campaign_name, campaign_id)
 
                 item = RedtrackReportItem(
                     campaign_id=campaign_id,
-                    squad=squad,
+                    squad=campaign_info.squad,
+                    checkout=campaign_info.checkout,
+                    product=campaign_info.product,
                     date=report_datetime,
                     cost=cost,
                     revenue=float(row.get("revenue", 0) or 0),
@@ -103,15 +111,15 @@ async def redtrack_reports() -> RedtrackResponse:
                 cost_total += cost
 
                 logger.debug(
-                    "   [%s/%s] %s | squad=%s | cost=%.2f | profit=%.2f | roi=%.2f | conversion=%.4f",
+                    "   [%s/%s] %s | squad=%s | checkout=%s | product=%s | cost=%.2f | profit=%.2f",
                     idx,
                     len(page_rows),
                     campaign_id,
-                    squad,
+                    campaign_info.squad,
+                    campaign_info.checkout,
+                    campaign_info.product,
                     cost,
                     profit,
-                    row.get("roi", 0),
-                    0.0,
                 )
 
             if len(page_rows) < params_hourly["per"]:
@@ -124,10 +132,43 @@ async def redtrack_reports() -> RedtrackResponse:
         logger.info("📌 ETAPA 2: Buscando conversões em requisição separada...")
         conversions: dict[str, float] = {}
         events_by_campaign: dict[str, dict[str, int]] = {}
+        aggregated_conversions: AggregatedConversions | None = None
+        
         try:
-            events_by_campaign = await fetch_all_events(client, date_from=date_from, date_to=date_to)
-            conversions = calculate_conversions(events_by_campaign)
+            # Usar nova função que filtra apenas Purchase e InitiateCheckout
+            aggregated_conversions = await fetch_all_conversions(
+                client, 
+                date_from=date_from, 
+                date_to=date_to
+            )
+            
+            # Converter para formato legado para compatibilidade
+            events_by_campaign = {
+                campaign_id: {
+                    "InitiateCheckout": metrics.initiate_checkout,
+                    "Purchase": metrics.purchase,
+                }
+                for campaign_id, metrics in aggregated_conversions.by_campaign.items()
+            }
+            
+            conversions = get_conversion_rates_by_campaign(aggregated_conversions)
             logger.info("✅ %s campanhas com conversão calculada", len(conversions))
+            
+            # Log de conversões por checkout e produto
+            for checkout, metrics in aggregated_conversions.by_checkout.items():
+                if checkout != "unknown":
+                    logger.info(
+                        "   🛒 Checkout %s: IC=%s, P=%s, Taxa=%.2f%%",
+                        checkout, metrics.initiate_checkout, metrics.purchase, metrics.conversion_rate
+                    )
+            
+            for product, metrics in aggregated_conversions.by_product.items():
+                if product != "unknown":
+                    logger.info(
+                        "   📦 Produto %s: IC=%s, P=%s, Taxa=%.2f%%",
+                        product, metrics.initiate_checkout, metrics.purchase, metrics.conversion_rate
+                    )
+                    
         except Exception as exc:
             logger.error(
                 "❌ Falha ao buscar conversões no Redtrack: %s. "
@@ -170,14 +211,28 @@ async def redtrack_reports() -> RedtrackResponse:
 
                 if target_date == today_date:
                     target_events = events_by_campaign
+                    target_conversions = aggregated_conversions
                 else:
-                    target_events = await fetch_all_events(
+                    # Buscar conversões do dia anterior
+                    target_conversions = await fetch_all_conversions(
                         client,
                         date_from=target_day,
                         date_to=target_day,
                     )
+                    target_events = {
+                        campaign_id: {
+                            "InitiateCheckout": metrics.initiate_checkout,
+                            "Purchase": metrics.purchase,
+                        }
+                        for campaign_id, metrics in target_conversions.by_campaign.items()
+                    }
 
-                persist_daily_summary_snapshot(summary_rows, target_date, target_events)
+                persist_daily_summary_snapshot(
+                    summary_rows, 
+                    target_date, 
+                    target_events,
+                    conversions=target_conversions,
+                )
 
             log_cards_preview()
         except Exception as exc:
