@@ -92,6 +92,7 @@ const DashboardGrafico = ({
             xKey,
             axisLabel: getAxisLabel(item),
             tooltipLabel: getTooltipLabel(item),
+            checkout: Number(item.checkout_conversion ?? 0),
             faturamento: Number(item.revenue ?? 0),
             gasto: Number(item.cost ?? 0),
             relacao,
@@ -209,6 +210,8 @@ const DashboardGrafico = ({
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={dadosUnificados}
+              barCategoryGap="35%"
+              barGap={2}
               margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
             >
               <CartesianGrid
@@ -254,12 +257,17 @@ const DashboardGrafico = ({
                     return [`$${numericValue.toFixed(2)}`, "Gasto"];
                   }
 
+                  if (key === "checkout") {
+                    return [numericValue.toFixed(2), "Checkout Conversion"];
+                  }
+
                   return [`$${numericValue.toFixed(2)}`, "Faturamento"];
                 }}
               />
               <Legend
                 wrapperStyle={{ fontSize: "11px", color: "#9ca3af" }}
                 formatter={(value: string) => {
+                  if (value === "checkout") return "Checkout";
                   if (value === "gasto") return "Gasto";
                   if (value === "faturamento") return "Faturamento";
                   return "ROI";
@@ -267,16 +275,23 @@ const DashboardGrafico = ({
               />
               <Bar
                 yAxisId="valores"
+                dataKey="checkout"
+                fill="#f59e0b"
+                barSize={8}
+                radius={[4, 4, 0, 0]}
+              />
+              <Bar
+                yAxisId="valores"
                 dataKey="gasto"
                 fill="#ef4444"
-                barSize={10}
+                barSize={8}
                 radius={[4, 4, 0, 0]}
               />
               <Bar
                 yAxisId="valores"
                 dataKey="faturamento"
                 fill="#2563eb"
-                barSize={14}
+                barSize={8}
                 radius={[4, 4, 0, 0]}
               />
               {labelsNegativos.map((label) => (

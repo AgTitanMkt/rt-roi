@@ -50,6 +50,26 @@ function App() {
     [hourly],
   );
 
+  const checkoutTotals = useMemo(() => {
+    return hourly.reduce(
+      (acc, item) => {
+        const value = Number(item.checkout_conversion ?? 0);
+        if (item.day === "yesterday") {
+          acc.yesterday += value;
+        } else {
+          acc.today += value;
+        }
+        return acc;
+      },
+      { today: 0, yesterday: 0 },
+    );
+  }, [hourly]);
+
+  const checkoutChange =
+    checkoutTotals.yesterday !== 0
+      ? ((checkoutTotals.today - checkoutTotals.yesterday) / Math.abs(checkoutTotals.yesterday)) * 100
+      : 0;
+
   const formatMoney = (value: number | undefined): number =>
     Number((value ?? 0).toFixed(2));
 
@@ -95,6 +115,15 @@ function App() {
           data={formatMoney(yesterday?.profit)}
           categoria={formatPercentage(comparison?.profit_change)}
           tendencia={(comparison?.profit_change ?? 0) < 0 ? "baixa" : "alta"}
+        />
+        <ValorCard
+          nome="Checkout"
+          valor={formatMoney(checkoutTotals.today)}
+          data={formatMoney(checkoutTotals.yesterday)}
+          categoria={formatPercentage(checkoutChange)}
+          tendencia={checkoutChange < 0 ? "baixa" : "alta"}
+          prefixo=""
+          className="isHighlight"
         />
         <CardRoi
           nome="ROI"
