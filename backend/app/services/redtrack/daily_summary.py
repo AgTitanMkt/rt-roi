@@ -1,12 +1,14 @@
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 import logging
+from typing import Optional
 
 import httpx
 
 from ...core.database import SessionLocal
-from ...models.metrics import DailySummary
+from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSummary
 from ..metrics_service import get_summary as get_summary_metrics
+from .conversions import AggregatedConversions, extract_campaign_info
 from .http_client import make_request_with_retry
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL
 
@@ -19,6 +21,10 @@ def _q2(value: float | Decimal) -> Decimal:
 
 def _q4(value: float | Decimal) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def _q0(value: int | float | Decimal) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
 
 def _extract_squad_from_campaign_name(campaign_name: str) -> str:
@@ -60,13 +66,26 @@ def persist_daily_summary_snapshot(
     rows: list[dict],
     metric_date: date,
     events_by_campaign: dict[str, dict[str, int]] | None = None,
+    conversions: Optional[AggregatedConversions] = None,
 ) -> None:
+    """
+    Persiste os dados de resumo diário.
+    
+    Args:
+        rows: Linhas do relatório de campanhas
+        metric_date: Data do relatório
+        events_by_campaign: Formato legado de eventos (será usado se conversions for None)
+        conversions: Novo formato com agregações por checkout e produto
+    """
     if not rows:
         return
 
     by_squad: dict[str, dict[str, Decimal | int]] = {}
+    
     for row in rows:
-        squad = _extract_squad_from_campaign_name(str(row.get("campaign") or ""))
+        campaign_name = str(row.get("campaign") or "")
+        squad = _extract_squad_from_campaign_name(campaign_name)
+        
         if squad not in by_squad:
             by_squad[squad] = {
                 "cost": Decimal("0"),
@@ -82,12 +101,20 @@ def persist_daily_summary_snapshot(
 
         campaign_id = str(row.get("campaign_id") or row.get("campaignId") or row.get("campaign") or "").strip()
         if campaign_id:
-            events = events_by_campaign.get(campaign_id, {}) if isinstance(events_by_campaign, dict) else {}
-            by_squad[squad]["initiate"] += int(events.get("InitiateCheckout", 0) or 0)
-            by_squad[squad]["purchase"] += int(events.get("Purchase", 0) or 0)
+            # Usar eventos do formato legado se disponível
+            if events_by_campaign and campaign_id in events_by_campaign:
+                events = events_by_campaign[campaign_id]
+                by_squad[squad]["initiate"] += int(events.get("InitiateCheckout", 0) or 0)
+                by_squad[squad]["purchase"] += int(events.get("Purchase", 0) or 0)
+            # Ou usar o novo formato de conversions
+            elif conversions and campaign_id in conversions.by_campaign:
+                metrics = conversions.by_campaign[campaign_id]
+                by_squad[squad]["initiate"] += metrics.initiate_checkout
+                by_squad[squad]["purchase"] += metrics.purchase
 
     db = SessionLocal()
     try:
+        # Persistir sumário por squad
         for squad, agg in by_squad.items():
             cost = _q2(agg["cost"])
             profit = _q2(agg["profit"])
@@ -121,7 +148,14 @@ def persist_daily_summary_snapshot(
                     )
                 )
 
+        # Persistir sumário por checkout (Cartpanda, Clickbank) se tiver conversions
+        if conversions:
+            _persist_checkout_summary(db, metric_date, conversions)
+            _persist_product_summary(db, metric_date, conversions)
+
         db.commit()
+        
+        # Log de resumo
         total_cost = _q2(sum((values["cost"] for values in by_squad.values()), Decimal("0")))
         total_profit = _q2(sum((values["profit"] for values in by_squad.values()), Decimal("0")))
         total_revenue = _q2(sum((values["revenue"] for values in by_squad.values()), Decimal("0")))
@@ -129,6 +163,7 @@ def persist_daily_summary_snapshot(
         total_purchase = sum(int(values.get("purchase", 0) or 0) for values in by_squad.values())
         total_checkout = _q2((total_purchase / total_initiate) * 100 if total_initiate > 0 else 0)
         total_roi = _q4((total_profit / total_cost) if total_cost > 0 else 0)
+        
         logger.info("✅ Snapshot diário salvo: %s squads para %s", len(by_squad), metric_date)
         logger.info(
             "📌 SUMMARY DIÁRIO (base dos cards) %s | cost=%s revenue=%s profit=%s checkout=%s roi=%s",
@@ -139,11 +174,99 @@ def persist_daily_summary_snapshot(
             f"{total_checkout:.2f}",
             f"{total_roi:.4f}",
         )
+        
+        if conversions:
+            logger.info("📊 Checkouts salvos: %s", list(conversions.by_checkout.keys()))
+            logger.info("📊 Produtos salvos: %s", list(conversions.by_product.keys()))
+            
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+
+
+def _persist_checkout_summary(
+    db,
+    metric_date: date,
+    conversions: AggregatedConversions,
+) -> None:
+    """Persiste dados de conversão por checkout (Cartpanda, Clickbank)."""
+    
+    # Geral por checkout
+    for checkout, metrics in conversions.by_checkout.items():
+        if checkout == "unknown":
+            continue
+            
+        conversion_rate = _q2(metrics.conversion_rate)
+        
+        existing = db.query(DailyCheckoutSummary).filter(
+            DailyCheckoutSummary.metric_date == metric_date,
+            DailyCheckoutSummary.checkout == checkout,
+            DailyCheckoutSummary.squad == "ALL",
+        ).one_or_none()
+        
+        if existing:
+            existing.initiate_checkout = _q0(metrics.initiate_checkout)
+            existing.purchase = _q0(metrics.purchase)
+            existing.checkout_conversion = conversion_rate
+        else:
+            db.add(
+                DailyCheckoutSummary(
+                    metric_date=metric_date,
+                    checkout=checkout,
+                    squad="ALL",
+                    initiate_checkout=_q0(metrics.initiate_checkout),
+                    purchase=_q0(metrics.purchase),
+                    checkout_conversion=conversion_rate,
+                )
+            )
+    
+    logger.info(
+        "📊 Checkout Summary: %s checkouts persistidos",
+        len([c for c in conversions.by_checkout.keys() if c != "unknown"])
+    )
+
+
+def _persist_product_summary(
+    db,
+    metric_date: date,
+    conversions: AggregatedConversions,
+) -> None:
+    """Persiste dados de conversão por produto."""
+    
+    for product, metrics in conversions.by_product.items():
+        if product == "unknown":
+            continue
+            
+        conversion_rate = _q2(metrics.conversion_rate)
+        
+        existing = db.query(DailyProductSummary).filter(
+            DailyProductSummary.metric_date == metric_date,
+            DailyProductSummary.product == product,
+            DailyProductSummary.squad == "ALL",
+        ).one_or_none()
+        
+        if existing:
+            existing.initiate_checkout = _q0(metrics.initiate_checkout)
+            existing.purchase = _q0(metrics.purchase)
+            existing.checkout_conversion = conversion_rate
+        else:
+            db.add(
+                DailyProductSummary(
+                    metric_date=metric_date,
+                    product=product,
+                    squad="ALL",
+                    initiate_checkout=_q0(metrics.initiate_checkout),
+                    purchase=_q0(metrics.purchase),
+                    checkout_conversion=conversion_rate,
+                )
+            )
+    
+    logger.info(
+        "📊 Product Summary: %s produtos persistidos",
+        len([p for p in conversions.by_product.keys() if p != "unknown"])
+    )
 
 
 def log_cards_preview() -> None:
@@ -175,4 +298,3 @@ def log_cards_preview() -> None:
         )
     finally:
         db.close()
-
