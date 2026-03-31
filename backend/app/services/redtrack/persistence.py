@@ -12,6 +12,8 @@ def persist_metrics_report(data: RedtrackResponse) -> None:
         {
             "id": item.campaign_id,
             "squad": item.squad,
+            "checkout": item.checkout,
+            "product": item.product,
             "metric_at": item.date,
             "cost": item.cost,
             "profit": item.profit,

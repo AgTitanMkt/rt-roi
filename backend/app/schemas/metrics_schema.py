@@ -28,6 +28,7 @@ class SummaryResponse(BaseModel):
 
 
 class HourlyMetricResponse(BaseModel):
+    squad: str = Field("", examples=["FBR"], description="Squad associado ao filtro aplicado")
     slot: str = Field(..., examples=["2026-03-28T14:00:00"], description="Timestamp da janela horaria em America/Sao_Paulo")
     day: str = Field(..., examples=["today", "yesterday"], description="Identifica se o ponto pertence a hoje ou ontem")
     hour: str = Field(..., examples=["14"], description="Hora do dia (formato HH, 0-23)")
@@ -36,3 +37,27 @@ class HourlyMetricResponse(BaseModel):
     profit: float = Field(..., examples=[4.2], description="Lucro agregado da hora")
     revenue: float = Field(..., examples=[45.0], description="Receita agregada da hora")
     roi: float = Field(..., examples=[0.35], description="ROI agregado da hora")
+
+
+class CheckoutSummaryItem(BaseModel):
+    checkout: str = Field(..., examples=["Cartpanda"], description="Nome do checkout")
+    initiate_checkout: int = Field(..., examples=[150], description="Total de initiate checkout")
+    purchase: int = Field(..., examples=[45], description="Total de purchase")
+    checkout_conversion: float = Field(..., examples=[30.0], description="Taxa de conversao em %")
+
+
+class ProductSummaryItem(BaseModel):
+    product: str = Field(..., examples=["ErosLift"], description="Nome do produto")
+    initiate_checkout: int = Field(..., examples=[120], description="Total de initiate checkout")
+    purchase: int = Field(..., examples=[36], description="Total de purchase")
+    checkout_conversion: float = Field(..., examples=[30.0], description="Taxa de conversao em %")
+
+
+class SquadSummaryItem(BaseModel):
+    squad: str = Field(..., examples=["FBR"], description="Squad")
+    cost: float = Field(..., examples=[5000.0], description="Custo agregado")
+    profit: float = Field(..., examples=[2500.0], description="Lucro agregado")
+    revenue: float = Field(..., examples=[7500.0], description="Receita agregada")
+    checkout_conversion: float = Field(..., examples=[28.5], description="Taxa de conversao em %")
+    roi: float = Field(..., examples=[0.5], description="ROI agregado")
+

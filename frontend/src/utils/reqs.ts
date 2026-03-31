@@ -136,8 +136,10 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   }
 };
 
-export const fetchSummary = (squad?: string): Promise<SummaryResponse> =>
-  fetchJson<SummaryResponse>(withSquad("/metrics/summary", squad));
+export const fetchSummary = (squad?: string, period: string = "24h"): Promise<SummaryResponse> => {
+  const path = `/metrics/summary?period=${period}`;
+  return fetchJson<SummaryResponse>(withSquad(path, squad));
+};
 
 export const fetchHourly = (squad?: string, period: string = "24h"): Promise<HourlyMetric[]> => {
   const path = `/metrics/hourly/period?period=${period}`;
@@ -187,7 +189,7 @@ export const useDashboardData = ({
       setIsHealthy(healthy);
 
       const [summaryResult, hourlyResult, checkoutsResult, productsResult, squadsResult] = await Promise.allSettled([
-        fetchSummary(squad),
+        fetchSummary(squad, period),
         fetchHourly(squad, period),
         fetchCheckoutMetrics(squad, period),
         fetchProductMetrics(squad, period),

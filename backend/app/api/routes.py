@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
-from ..schemas.metrics_schema import HourlyMetricResponse, SummaryResponse
+from ..schemas.metrics_schema import (
+    HourlyMetricResponse,
+    SummaryResponse,
+    CheckoutSummaryItem,
+    ProductSummaryItem,
+    SquadSummaryItem,
+)
 from ..services.redis_service import get_summary_cached, get_hourly_cached
 from ..services.metrics_service import (
     get_metrics_by_period,
@@ -151,6 +157,7 @@ def get_hourly(
 
     return [
         {
+            "squad": str(_get_value(row, "squad", "")),
             "slot": str(_get_value(row, "slot", "")),
             "day": str(_get_value(row, "day", "")),
             "hour": str(_get_value(row, "hour", "")),
@@ -199,6 +206,7 @@ def get_hourly_period(
     
     return [
         {
+            "squad": str(_get_value(row, "squad", "")),
             "slot": str(_get_value(row, "slot", "")),
             "day": str(_get_value(row, "day", "")),
             "hour": str(_get_value(row, "hour", "")),
@@ -214,6 +222,7 @@ def get_hourly_period(
 
 @router.get(
     "/by-checkout",
+            response_model=list[CheckoutSummaryItem],
     summary="Retorna conversão por checkout (Cartpanda, Clickbank)",
     description=(
         "Retorna as métricas de conversão agrupadas por checkout.\n\n"
@@ -265,6 +274,7 @@ def get_by_checkout(
 
 @router.get(
     "/by-product",
+            response_model=list[ProductSummaryItem],
     summary="Retorna conversão por produto",
     description=(
         "Retorna as métricas de conversão agrupadas por produto.\n\n"
@@ -316,6 +326,7 @@ def get_by_product(
 
 @router.get(
     "/by-squad",
+            response_model=list[SquadSummaryItem],
     summary="Retorna métricas por squad",
     description=(
         "Retorna as métricas de custo, lucro, ROI e conversão agrupadas por squad.\n\n"

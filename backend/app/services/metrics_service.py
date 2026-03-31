@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
-from ..models.metrics import DailySummary, HourlyMetric, DailyCheckoutSummary, DailyProductSummary
+from ..models.metrics import DailySummary, HourlyMetric
 
 
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
@@ -24,6 +24,51 @@ def _normalize_squad(value: str | None) -> str:
     return squad or "unknown"
 
 
+def _table_exists(db: Session, table_name: str) -> bool:
+    exists = db.execute(
+        text("SELECT to_regclass(:table_name) IS NOT NULL"),
+        {"table_name": f"public.{table_name}"},
+    ).scalar()
+    return bool(exists)
+
+
+def _get_checkout_conversion_range(
+    db: Session,
+    start_date: date,
+    end_date: date,
+    source: str | None,
+) -> Decimal | None:
+    if not _table_exists(db, "tb_daily_checkout_summary"):
+        return None
+
+    query = """
+        SELECT
+            SUM(initiate_checkout) AS initiate_checkout,
+            SUM(purchase) AS purchase
+        FROM tb_daily_checkout_summary
+        WHERE metric_date BETWEEN :start_date AND :end_date
+          AND checkout = 'ALL'
+    """
+
+    params: dict[str, object] = {
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
+    if source:
+        query += " AND UPPER(squad) = UPPER(:source)"
+        params["source"] = source
+    else:
+        query += " AND squad = 'ALL'"
+
+    row = db.execute(text(query), params).fetchone()
+    initiate = float(getattr(row, "initiate_checkout", 0) or 0)
+    purchase = float(getattr(row, "purchase", 0) or 0)
+    if initiate <= 0:
+        return _q2(0)
+    return _q2((purchase / initiate) * 100)
+
+
 def _refresh_daily_summary(db: Session, affected_keys: set[tuple[date, str]]) -> None:
     if not affected_keys:
         return
@@ -36,7 +81,7 @@ def _refresh_daily_summary(db: Session, affected_keys: set[tuple[date, str]]) ->
             func.coalesce(func.sum(HourlyMetric.cost), 0).label("cost"),
             func.coalesce(func.sum(HourlyMetric.profit), 0).label("profit"),
             func.coalesce(func.sum(HourlyMetric.revenue), 0).label("revenue"),
-            func.coalesce(func.sum(HourlyMetric.checkout_conversion), 1).label("checkout_conversion"),
+            func.coalesce(func.sum(HourlyMetric.checkout_conversion), 0).label("checkout_conversion"),
         ).filter(
             HourlyMetric.metric_at >= day_start,
             HourlyMetric.metric_at < day_end,
@@ -46,7 +91,7 @@ def _refresh_daily_summary(db: Session, affected_keys: set[tuple[date, str]]) ->
         cost = _q2(getattr(agg, "cost", 0))
         profit = _q2(getattr(agg, "profit", 0))
         revenue = _q2(getattr(agg, "revenue", 0))
-        checkout_conversion = _q2(getattr(agg, "checkout_conversion", 1))
+        checkout_conversion = _q2(getattr(agg, "checkout_conversion", 0))
         roi = _q4((profit / cost) if cost > 0 else 0)
 
         summary_row = db.query(DailySummary).filter(
@@ -89,6 +134,8 @@ def insert_metrics(db: Session, data: list):
             "campaign_id": campaign_id,
             "metric_at": metric_at,
             "squad": _normalize_squad(item.get("squad")),
+            "checkout": str(item.get("checkout") or "unknown").strip() or "unknown",
+            "product": str(item.get("product") or "unknown").strip() or "unknown",
             "cost": _q2(item.get("cost")),
             "profit": _q2(item.get("profit")),
             "revenue": _q2(item.get("revenue")),
@@ -163,6 +210,8 @@ def insert_metrics(db: Session, data: list):
         existing = existing_by_key.get(key)
         if existing:
             existing.squad = item["squad"]
+            existing.checkout = item["checkout"]
+            existing.product = item["product"]
             existing.cost = item["cost"]
             existing.profit = item["profit"]
             existing.revenue = item["revenue"]
@@ -175,6 +224,8 @@ def insert_metrics(db: Session, data: list):
                     campaign_id=item["campaign_id"],
                     metric_at=item["metric_at"],
                     squad=item["squad"],
+                    checkout=item["checkout"],
+                    product=item["product"],
                     cost=item["cost"],
                     profit=item["profit"],
                     revenue=item["revenue"],
@@ -223,7 +274,7 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
                 SUM(cost) as cost,
                 SUM(profit) as profit,
                 SUM(revenue) as revenue,
-                ROUND(AVG(checkout_conversion), 2) as checkout,
+                ROUND(AVG(checkout_conversion), 2) as checkout_avg,
                 ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
             FROM tb_daily_metrics_summary
             WHERE metric_date BETWEEN :start_date AND :end_date
@@ -242,20 +293,22 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
 
     current_data = _fetch_range_agg(current_start, current_end)
     previous_data = _fetch_range_agg(previous_start, previous_end)
+    current_checkout = _get_checkout_conversion_range(db, current_start, current_end, source)
+    previous_checkout = _get_checkout_conversion_range(db, previous_start, previous_end, source)
 
     result_obj = {
         "today": {
             "cost": _q2(getattr(current_data, "cost", 0) or 0),
             "profit": _q2(getattr(current_data, "profit", 0) or 0),
             "revenue": _q2(getattr(current_data, "revenue", 0) or 0),
-            "checkout": _q2(getattr(current_data, "checkout", 0) or 0),
+            "checkout": current_checkout if current_checkout is not None else _q2(getattr(current_data, "checkout_avg", 0) or 0),
             "roi": _q4(getattr(current_data, "roi", 0) or 0),
         },
         "yesterday": {
             "cost": _q2(getattr(previous_data, "cost", 0) or 0),
             "profit": _q2(getattr(previous_data, "profit", 0) or 0),
             "revenue": _q2(getattr(previous_data, "revenue", 0) or 0),
-            "checkout": _q2(getattr(previous_data, "checkout", 0) or 0),
+            "checkout": previous_checkout if previous_checkout is not None else _q2(getattr(previous_data, "checkout_avg", 0) or 0),
             "roi": _q4(getattr(previous_data, "roi", 0) or 0),
         },
         "comparison": {
@@ -270,13 +323,13 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
     current_cost = float(getattr(current_data, "cost", 0) or 0)
     current_profit = float(getattr(current_data, "profit", 0) or 0)
     current_revenue = float(getattr(current_data, "revenue", 0) or 0)
-    current_checkout = float(getattr(current_data, "checkout", 0) or 0)
+    current_checkout = float(result_obj["today"]["checkout"] or 0)
     current_roi = float(getattr(current_data, "roi", 0) or 0)
 
     previous_cost = float(getattr(previous_data, "cost", 0) or 0)
     previous_profit = float(getattr(previous_data, "profit", 0) or 0)
     previous_revenue = float(getattr(previous_data, "revenue", 0) or 0)
-    previous_checkout = float(getattr(previous_data, "checkout", 0) or 0)
+    previous_checkout = float(result_obj["yesterday"]["checkout"] or 0)
     previous_roi = float(getattr(previous_data, "roi", 0) or 0)
 
     if previous_cost != 0:
@@ -427,6 +480,9 @@ def get_checkout_summary(db: Session, squad: str = None, period: str = "24h"):
     """
     Retorna métricas de conversão por checkout (Cartpanda, Clickbank).
     """
+    if not _table_exists(db, "tb_daily_checkout_summary"):
+        return []
+
     sp_today = datetime.now(SAO_PAULO_TZ).date()
     
     if period == "weekly":
@@ -483,6 +539,9 @@ def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
     """
     Retorna métricas de conversão por produto.
     """
+    if not _table_exists(db, "tb_daily_product_summary"):
+        return []
+
     sp_today = datetime.now(SAO_PAULO_TZ).date()
     
     if period == "weekly":
@@ -551,21 +610,59 @@ def get_squad_checkout_summary(db: Session, period: str = "24h"):
         date_start = sp_today
         date_end = sp_today
     
-    # Obter dados por squad de tb_daily_metrics_summary
-    query = """
-        SELECT
-            squad,
-            SUM(cost) as cost,
-            SUM(profit) as profit,
-            SUM(revenue) as revenue,
-            ROUND(AVG(checkout_conversion), 2) as checkout_conversion,
-            ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
-        FROM tb_daily_metrics_summary
-        WHERE metric_date BETWEEN :date_start AND :date_end
-          AND squad != 'unknown'
-        GROUP BY squad
-        ORDER BY profit DESC
-    """
+    if _table_exists(db, "tb_daily_checkout_summary"):
+        query = """
+            WITH cost_profit AS (
+                SELECT
+                    squad,
+                    SUM(cost) AS cost,
+                    SUM(profit) AS profit,
+                    SUM(revenue) AS revenue
+                FROM tb_daily_metrics_summary
+                WHERE metric_date BETWEEN :date_start AND :date_end
+                  AND squad != 'unknown'
+                GROUP BY squad
+            ),
+            conversions AS (
+                SELECT
+                    squad,
+                    CASE
+                        WHEN SUM(initiate_checkout) > 0
+                        THEN ROUND((SUM(purchase)::numeric / SUM(initiate_checkout)) * 100, 2)
+                        ELSE 0
+                    END AS checkout_conversion
+                FROM tb_daily_checkout_summary
+                WHERE metric_date BETWEEN :date_start AND :date_end
+                  AND checkout = 'ALL'
+                  AND squad != 'ALL'
+                GROUP BY squad
+            )
+            SELECT
+                cp.squad,
+                cp.cost,
+                cp.profit,
+                cp.revenue,
+                COALESCE(c.checkout_conversion, 0) AS checkout_conversion,
+                ROUND(cp.profit / NULLIF(cp.cost, 0), 4) AS roi
+            FROM cost_profit cp
+            LEFT JOIN conversions c ON c.squad = cp.squad
+            ORDER BY cp.profit DESC
+        """
+    else:
+        query = """
+            SELECT
+                squad,
+                SUM(cost) as cost,
+                SUM(profit) as profit,
+                SUM(revenue) as revenue,
+                ROUND(AVG(checkout_conversion), 2) as checkout_conversion,
+                ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
+            FROM tb_daily_metrics_summary
+            WHERE metric_date BETWEEN :date_start AND :date_end
+              AND squad != 'unknown'
+            GROUP BY squad
+            ORDER BY profit DESC
+        """
     
     params = {"date_start": date_start, "date_end": date_end}
     result = db.execute(text(query), params)

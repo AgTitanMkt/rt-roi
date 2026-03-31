@@ -8,7 +8,7 @@ import httpx
 from ...core.database import SessionLocal
 from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSummary
 from ..metrics_service import get_summary as get_summary_metrics
-from .conversions import AggregatedConversions, extract_campaign_info
+from .conversions import AggregatedConversions
 from .http_client import make_request_with_retry
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL
 
@@ -148,6 +148,24 @@ def persist_daily_summary_snapshot(
                     )
                 )
 
+            _upsert_daily_checkout_totals(
+                db=db,
+                metric_date=metric_date,
+                squad=squad,
+                initiate_total=initiate_total,
+                purchase_total=purchase_total,
+            )
+
+        total_initiate = sum(int(values.get("initiate", 0) or 0) for values in by_squad.values())
+        total_purchase = sum(int(values.get("purchase", 0) or 0) for values in by_squad.values())
+        _upsert_daily_checkout_totals(
+            db=db,
+            metric_date=metric_date,
+            squad="ALL",
+            initiate_total=total_initiate,
+            purchase_total=total_purchase,
+        )
+
         # Persistir sumário por checkout (Cartpanda, Clickbank) se tiver conversions
         if conversions:
             _persist_checkout_summary(db, metric_date, conversions)
@@ -159,8 +177,6 @@ def persist_daily_summary_snapshot(
         total_cost = _q2(sum((values["cost"] for values in by_squad.values()), Decimal("0")))
         total_profit = _q2(sum((values["profit"] for values in by_squad.values()), Decimal("0")))
         total_revenue = _q2(sum((values["revenue"] for values in by_squad.values()), Decimal("0")))
-        total_initiate = sum(int(values.get("initiate", 0) or 0) for values in by_squad.values())
-        total_purchase = sum(int(values.get("purchase", 0) or 0) for values in by_squad.values())
         total_checkout = _q2((total_purchase / total_initiate) * 100 if total_initiate > 0 else 0)
         total_roi = _q4((total_profit / total_cost) if total_cost > 0 else 0)
         
@@ -184,6 +200,38 @@ def persist_daily_summary_snapshot(
         raise
     finally:
         db.close()
+
+
+def _upsert_daily_checkout_totals(
+    db,
+    metric_date: date,
+    squad: str,
+    initiate_total: int,
+    purchase_total: int,
+) -> None:
+    conversion_rate = _q2((purchase_total / initiate_total) * 100 if initiate_total > 0 else 0)
+
+    existing = db.query(DailyCheckoutSummary).filter(
+        DailyCheckoutSummary.metric_date == metric_date,
+        DailyCheckoutSummary.checkout == "ALL",
+        DailyCheckoutSummary.squad == squad,
+    ).one_or_none()
+
+    if existing:
+        existing.initiate_checkout = _q0(initiate_total)
+        existing.purchase = _q0(purchase_total)
+        existing.checkout_conversion = conversion_rate
+    else:
+        db.add(
+            DailyCheckoutSummary(
+                metric_date=metric_date,
+                checkout="ALL",
+                squad=squad,
+                initiate_checkout=_q0(initiate_total),
+                purchase=_q0(purchase_total),
+                checkout_conversion=conversion_rate,
+            )
+        )
 
 
 def _persist_checkout_summary(

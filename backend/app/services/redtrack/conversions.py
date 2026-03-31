@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 
 from .http_client import make_request_with_retry
-from .settings import REDTRACK_API_KEY, REDTRACK_CONVERSIONS_URL
+from .settings import REDTRACK_API_KEY, REDTRACK_CONVERSIONS_URL, REDTRACK_REPORT_URL
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +97,17 @@ def extract_campaign_info(campaign_name: str, campaign_id: str = "") -> Campaign
 
 def _get_campaign_id(row: dict) -> str:
     """Extrai o ID da campanha de uma linha de dados."""
+    campaign = row.get("campaign")
+    if isinstance(campaign, dict):
+        nested_id = str(campaign.get("id") or campaign.get("campaign_id") or "").strip()
+        if nested_id:
+            return nested_id
+
     return str(
         row.get("campaign_id")
         or row.get("campaignId")
+        or row.get("cid")
+        or row.get("id")
         or row.get("campaign")
         or ""
     ).strip()
@@ -107,6 +115,12 @@ def _get_campaign_id(row: dict) -> str:
 
 def _get_campaign_name(row: dict) -> str:
     """Extrai o nome da campanha de uma linha de dados."""
+    campaign = row.get("campaign")
+    if isinstance(campaign, dict):
+        nested_name = str(campaign.get("name") or campaign.get("campaign_name") or "").strip()
+        if nested_name:
+            return nested_name
+
     return str(row.get("campaign") or row.get("campaign_name") or "").strip()
 
 
@@ -115,8 +129,16 @@ def _get_conversion_type(row: dict) -> Optional[str]:
     Extrai e normaliza o tipo de conversão.
     Retorna None se não for um tipo válido (Purchase ou InitiateCheckout).
     """
-    raw_type = str(row.get("type") or row.get("event_type") or "").strip().lower()
-    
+    raw_type = str(
+        row.get("type")
+        or row.get("event_type")
+        or row.get("conversion_type")
+        or row.get("conversionType")
+        or row.get("goal")
+        or row.get("event")
+        or ""
+    ).strip().lower()
+
     if raw_type in VALID_CONVERSION_TYPES:
         return raw_type
     
@@ -131,7 +153,16 @@ def _get_conversion_type(row: dict) -> Optional[str]:
 
 def _get_event_count(row: dict) -> int:
     """Extrai a quantidade de eventos de uma linha."""
-    for key in ("count", "events", "conversions", "total", "value", "qty"):
+    for key in (
+        "count",
+        "event_count",
+        "events",
+        "conversions",
+        "total",
+        "value",
+        "qty",
+        "amount",
+    ):
         raw = row.get(key)
         if raw is None:
             continue
@@ -140,6 +171,19 @@ def _get_event_count(row: dict) -> int:
         except (TypeError, ValueError):
             continue
     return 1
+
+
+def _extract_rows(payload: object) -> list[dict]:
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+
+    if isinstance(payload, dict):
+        for key in ("rows", "data", "result", "items", "records"):
+            nested = payload.get(key)
+            if isinstance(nested, list):
+                return [row for row in nested if isinstance(row, dict)]
+
+    return []
 
 
 async def _fetch_conversions_page(
@@ -155,6 +199,7 @@ async def _fetch_conversions_page(
         "api_key": REDTRACK_API_KEY,
         "date_from": date_from,
         "date_to": date_to,
+        "time_interval": "lasthour",
         "timezone": "America/Sao_Paulo",
         "per": per_page,
         "page": page,
@@ -167,11 +212,102 @@ async def _fetch_conversions_page(
         delay_after=0.3
     )
     
-    if not isinstance(rows, list):
-        logger.warning("Resposta inesperada da API: esperado lista, recebido %s", type(rows))
-        return []
-    
-    return rows
+    parsed = _extract_rows(rows)
+    if parsed:
+        return parsed
+
+    if isinstance(rows, dict):
+        logger.warning(
+            "Resposta de conversões sem lista de linhas. Chaves recebidas: %s",
+            sorted(rows.keys()),
+        )
+    else:
+        logger.warning("Resposta inesperada da API: esperado lista/dict, recebido %s", type(rows))
+    return []
+
+
+async def _fetch_report_event_rows(
+    client: httpx.AsyncClient,
+    *,
+    event_type: str,
+    date_from: str,
+    date_to: str,
+) -> list[dict]:
+    params = {
+        "api_key": REDTRACK_API_KEY,
+        "date_from": date_from,
+        "date_to": date_to,
+        "type": event_type,
+        "timezone": "America/Sao_Paulo",
+        "per": 1000,
+        "page": 1,
+    }
+
+    rows_acc: list[dict] = []
+    while True:
+        payload = await make_request_with_retry(client, REDTRACK_REPORT_URL, params, delay_after=0.3)
+        rows = _extract_rows(payload)
+        if not rows:
+            break
+
+        rows_acc.extend(rows)
+        if len(rows) < params["per"]:
+            break
+        params["page"] += 1
+
+    return rows_acc
+
+
+async def _fallback_fetch_all_conversions_via_report(
+    client: httpx.AsyncClient,
+    *,
+    date_from: str,
+    date_to: str,
+) -> AggregatedConversions:
+    logger.info("↩️  Fallback: buscando conversões via /report por tipo de evento")
+
+    result = AggregatedConversions()
+    campaign_info_cache: dict[str, CampaignInfo] = {}
+
+    for event_type, is_purchase in (("InitiateCheckout", False), ("Purchase", True)):
+        rows = await _fetch_report_event_rows(
+            client,
+            event_type=event_type,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        for row in rows:
+            campaign_id = _get_campaign_id(row)
+            if not campaign_id:
+                continue
+
+            campaign_name = _get_campaign_name(row)
+            count = _get_event_count(row)
+
+            if campaign_id not in campaign_info_cache:
+                campaign_info_cache[campaign_id] = extract_campaign_info(campaign_name, campaign_id)
+
+            info = campaign_info_cache[campaign_id]
+            result.by_campaign.setdefault(campaign_id, ConversionMetrics())
+            result.by_squad.setdefault(info.squad, ConversionMetrics())
+            result.by_checkout.setdefault(info.checkout, ConversionMetrics())
+            result.by_product.setdefault(info.product, ConversionMetrics())
+
+            if is_purchase:
+                result.by_campaign[campaign_id].purchase += count
+                result.by_squad[info.squad].purchase += count
+                result.by_checkout[info.checkout].purchase += count
+                result.by_product[info.product].purchase += count
+                result.total.purchase += count
+            else:
+                result.by_campaign[campaign_id].initiate_checkout += count
+                result.by_squad[info.squad].initiate_checkout += count
+                result.by_checkout[info.checkout].initiate_checkout += count
+                result.by_product[info.product].initiate_checkout += count
+                result.total.initiate_checkout += count
+
+    return result
 
 
 async def fetch_all_conversions(
@@ -207,7 +343,10 @@ async def fetch_all_conversions(
         
         if not rows:
             break
-        
+
+        if page == 1:
+            logger.info("🔎 Campos recebidos em conversões (amostra): %s", sorted(rows[0].keys()))
+
         total_rows += len(rows)
         
         for row in rows:
@@ -278,15 +417,30 @@ async def fetch_all_conversions(
         total_rows,
         filtered_rows,
     )
+
+    if filtered_rows == 0 and total_rows > 0:
+        logger.warning(
+            "⚠️  Nenhuma linha mapeada para Purchase/InitiateCheckout via /conversions."
+            " Tentando fallback via /report."
+        )
+        result = await _fallback_fetch_all_conversions_via_report(
+            client,
+            date_from=date_from,
+            date_to=date_to,
+        )
     logger.info(
         "📊 Totais: InitiateCheckout=%s, Purchase=%s, Taxa=%.2f%%",
         result.total.initiate_checkout,
         result.total.purchase,
         result.total.conversion_rate,
     )
-    logger.info("📊 Squads: %s", list(result.by_squad.keys()))
-    logger.info("📊 Checkouts: %s", list(result.by_checkout.keys()))
-    logger.info("📊 Produtos: %s", list(result.by_product.keys()))
+    logger.info(
+        "📊 Dimensões processadas: campanhas=%s | squads=%s | checkouts=%s | produtos=%s",
+        len(result.by_campaign),
+        len(result.by_squad),
+        len(result.by_checkout),
+        len(result.by_product),
+    )
     
     return result
 
@@ -351,13 +505,13 @@ def calculate_conversions(events_by_campaign: dict) -> dict:
     conversions: dict[str, float] = {}
 
     for campaign_id, events in events_by_campaign.items():
-        initiate = events.get("InitiateCheckout", 0)
+        checkout = events.get("InitiateCheckout", 0)
         purchase = events.get("Purchase", 0)
 
-        if initiate == 0:
+        if checkout == 0:
             conversion = 0.0
         else:
-            conversion = (purchase / initiate) * 100
+            conversion = (purchase / checkout) * 100
 
         conversions[campaign_id] = conversion
 

@@ -12,7 +12,8 @@ class HourlyMetric(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     squad = Column(Text, nullable=False, default="unknown")
-    checkout = Column(Text, nullable=False, default="unknown")  # Cartpanda, Clickbank
+    # Database column is checkout_type; keep attribute name checkout for compatibility.
+    checkout = Column("checkout_type", Text, nullable=False, default="unknown")  # Cartpanda, Clickbank
     product = Column(Text, nullable=False, default="unknown")   # ErosLift, etc.
     cost = Column(Numeric(12, 2), default=0)
     profit = Column(Numeric(12, 2), default=0)

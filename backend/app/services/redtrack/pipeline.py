@@ -6,8 +6,6 @@ import httpx
 from ..redis_service import invalidate_metrics_cache
 from ...schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 from .conversions import (
-    calculate_conversions, 
-    fetch_all_events, 
     fetch_all_conversions,
     get_conversion_rates_by_campaign,
     extract_campaign_info,
@@ -19,6 +17,27 @@ from .persistence import persist_metrics_report
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL, SAO_PAULO_TZ
 
 logger = logging.getLogger(__name__)
+
+
+def _log_conversion_breakdown(title: str, rows: dict, icon: str, limit: int = 5) -> None:
+    filtered = [(name, metrics) for name, metrics in rows.items() if name != "unknown"]
+    if not filtered:
+        logger.info("   %s %s: sem dados", icon, title)
+        return
+
+    filtered.sort(
+        key=lambda item: (item[1].conversion_rate, item[1].purchase, item[1].initiate_checkout),
+        reverse=True,
+    )
+    logger.info("   %s %s (top %s)", icon, title, min(limit, len(filtered)))
+    for name, metrics in filtered[:limit]:
+        logger.info(
+            "      - %-20s | checkout=%-5s purchase=%-5s conversion=%.2f%%",
+            name,
+            metrics.initiate_checkout,
+            metrics.purchase,
+            metrics.conversion_rate,
+        )
 
 
 async def redtrack_reports() -> RedtrackResponse:
@@ -130,6 +149,7 @@ async def redtrack_reports() -> RedtrackResponse:
 
         logger.info("")
         logger.info("📌 ETAPA 2: Buscando conversões em requisição separada...")
+        logger.info("   🧮 Fórmula aplicada: (purchase / checkout) * 100")
         conversions: dict[str, float] = {}
         events_by_campaign: dict[str, dict[str, int]] = {}
         aggregated_conversions: AggregatedConversions | None = None
@@ -153,21 +173,9 @@ async def redtrack_reports() -> RedtrackResponse:
             
             conversions = get_conversion_rates_by_campaign(aggregated_conversions)
             logger.info("✅ %s campanhas com conversão calculada", len(conversions))
-            
-            # Log de conversões por checkout e produto
-            for checkout, metrics in aggregated_conversions.by_checkout.items():
-                if checkout != "unknown":
-                    logger.info(
-                        "   🛒 Checkout %s: IC=%s, P=%s, Taxa=%.2f%%",
-                        checkout, metrics.initiate_checkout, metrics.purchase, metrics.conversion_rate
-                    )
-            
-            for product, metrics in aggregated_conversions.by_product.items():
-                if product != "unknown":
-                    logger.info(
-                        "   📦 Produto %s: IC=%s, P=%s, Taxa=%.2f%%",
-                        product, metrics.initiate_checkout, metrics.purchase, metrics.conversion_rate
-                    )
+
+            _log_conversion_breakdown("Conversão por checkout", aggregated_conversions.by_checkout, "🛒")
+            _log_conversion_breakdown("Conversão por produto", aggregated_conversions.by_product, "📦")
                     
         except Exception as exc:
             logger.error(
