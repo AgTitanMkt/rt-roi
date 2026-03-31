@@ -40,7 +40,7 @@ def _is_summary_payload(payload):
 def _is_hourly_payload(payload):
     if not isinstance(payload, list):
         return False
-    required_keys = {"slot", "day", "hour", "cost", "profit", "revenue", "roi"}
+    required_keys = {"slot", "day", "hour", "checkout_conversion", "cost", "profit", "revenue", "roi"}
     return all(isinstance(item, dict) and required_keys.issubset(item.keys()) for item in payload)
 
 
@@ -54,6 +54,7 @@ def _hourly_to_list(rows):
                 "slot": str(mapping.get("slot") or ""),
                 "day": str(mapping.get("day") or ""),
                 "hour": str(mapping.get("hour") or ""),
+                "checkout_conversion": float(mapping.get("checkout_conversion") or 0),
                 "cost": float(mapping.get("cost") or 0),
                 "profit": float(mapping.get("profit") or 0),
                 "revenue": float(mapping.get("revenue") or 0),
@@ -107,7 +108,7 @@ def get_summary_cached(db, source=None):
 
 def get_hourly_cached(db, source=None):
     source = _normalize_source(source)
-    cache_key = f"hourly:v2:{source or 'all'}"
+    cache_key = f"hourly:v3:{source or 'all'}"
 
     cached = _cache_get(cache_key)
     if _is_hourly_payload(cached):

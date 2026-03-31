@@ -1,10 +1,10 @@
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text, tuple_
-from ..models.metrics import MetricsSnapshot
+from sqlalchemy import func, text
+from ..models.metrics import DailySummary, HourlyMetric
 
 
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
@@ -17,84 +17,137 @@ def _q2(value) -> Decimal:
 def _q4(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
+
+def _normalize_squad(value: str | None) -> str:
+    squad = str(value or "").strip()
+    return squad or "unknown"
+
+
+def _refresh_daily_summary(db: Session, affected_keys: set[tuple[date, str]]) -> None:
+    if not affected_keys:
+        return
+
+    for metric_date, squad in affected_keys:
+        day_start = datetime.combine(metric_date, datetime.min.time(), tzinfo=SAO_PAULO_TZ)
+        day_end = day_start + timedelta(days=1)
+
+        agg = db.query(
+            func.coalesce(func.sum(HourlyMetric.cost), 0).label("cost"),
+            func.coalesce(func.sum(HourlyMetric.profit), 0).label("profit"),
+            func.coalesce(func.sum(HourlyMetric.revenue), 0).label("revenue"),
+            func.coalesce(func.sum(HourlyMetric.checkout_conversion), 0).label("checkout_conversion"),
+        ).filter(
+            HourlyMetric.metric_at >= day_start,
+            HourlyMetric.metric_at < day_end,
+            HourlyMetric.squad == squad,
+        ).first()
+
+        cost = _q2(getattr(agg, "cost", 0))
+        profit = _q2(getattr(agg, "profit", 0))
+        revenue = _q2(getattr(agg, "revenue", 0))
+        checkout_conversion = _q2(getattr(agg, "checkout_conversion", 0))
+        roi = _q4((profit / cost) if cost > 0 else 0)
+
+        summary_row = db.query(DailySummary).filter(
+            DailySummary.metric_date == metric_date,
+            DailySummary.squad == squad,
+        ).one_or_none()
+
+        if summary_row:
+            summary_row.cost = cost
+            summary_row.profit = profit
+            summary_row.revenue = revenue
+            summary_row.checkout_conversion = checkout_conversion
+            summary_row.roi = roi
+        else:
+            db.add(
+                DailySummary(
+                    metric_date=metric_date,
+                    squad=squad,
+                    cost=cost,
+                    profit=profit,
+                    revenue=revenue,
+                    checkout_conversion=checkout_conversion,
+                    roi=roi,
+                )
+            )
+
+
 def insert_metrics(db: Session, data: list):
     if not data:
-        return {"inserted": 0, "ignored": 0}
+        return {"inserted": 0, "updated": 0, "ignored": 0}
 
-    # Evita duplicidade considerando o registro completo que compoe o snapshot.
-    unique_payload = {}
+    unique_payload: dict[tuple[str, datetime], dict] = {}
     for item in data:
-        norm_item = {
-            **item,
-            "metric_at": item["metric_at"],
-            "squad": item["squad"],
-            "cost": _q2(item["cost"]),
-            "profit": _q2(item["profit"]),
-            "revenue": _q2(item["revenue"]),
-            "roi": _q4(item["roi"]),
+        campaign_id = str(item.get("id") or "").strip()
+        metric_at = item.get("metric_at")
+        if not campaign_id or metric_at is None:
+            continue
+
+        unique_payload[(campaign_id, metric_at)] = {
+            "campaign_id": campaign_id,
+            "metric_at": metric_at,
+            "squad": _normalize_squad(item.get("squad")),
+            "cost": _q2(item.get("cost")),
+            "profit": _q2(item.get("profit")),
+            "revenue": _q2(item.get("revenue")),
+            "roi": _q4(item.get("roi")),
+            "checkout_conversion": _q2(item.get("checkout_conversion")),
         }
-        key = (
-            norm_item["metric_at"],
-            norm_item["squad"],
-            norm_item["cost"],
-            norm_item["profit"],
-            norm_item["revenue"],
-            norm_item["roi"],
-        )
-        unique_payload.setdefault(key, norm_item)
 
-    keys = list(unique_payload.keys())
+    if not unique_payload:
+        return {"inserted": 0, "updated": 0, "ignored": len(data)}
 
-    existing_rows = db.query(
-        MetricsSnapshot.metric_at,
-        MetricsSnapshot.squad,
-        MetricsSnapshot.cost,
-        MetricsSnapshot.profit,
-        MetricsSnapshot.revenue,
-        MetricsSnapshot.roi,
-    ).filter(
-        tuple_(
-            MetricsSnapshot.metric_at,
-            MetricsSnapshot.squad,
-            MetricsSnapshot.cost,
-            MetricsSnapshot.profit,
-            MetricsSnapshot.revenue,
-            MetricsSnapshot.roi,
-        ).in_(keys)
+    campaign_ids = list({k[0] for k in unique_payload})
+    metric_ats = list({k[1] for k in unique_payload})
+
+    existing_rows = db.query(HourlyMetric).filter(
+        HourlyMetric.campaign_id.in_(campaign_ids),
+        HourlyMetric.metric_at.in_(metric_ats),
     ).all()
+    existing_by_key = {(row.campaign_id, row.metric_at): row for row in existing_rows}
 
-    existing_keys = {
-        (row.metric_at, row.squad, row.cost, row.profit, row.revenue, row.roi)
-        for row in existing_rows
-    }
+    inserted = 0
+    updated = 0
+    affected_summary_keys: set[tuple[date, str]] = set()
 
-    rows_to_insert = [
-        item
-        for key, item in unique_payload.items()
-        if key not in existing_keys
-    ]
+    for key, item in unique_payload.items():
+        existing = existing_by_key.get(key)
+        if existing:
+            existing.squad = item["squad"]
+            existing.cost = item["cost"]
+            existing.profit = item["profit"]
+            existing.revenue = item["revenue"]
+            existing.roi = item["roi"]
+            existing.checkout_conversion = item["checkout_conversion"]
+            updated += 1
+        else:
+            db.add(
+                HourlyMetric(
+                    campaign_id=item["campaign_id"],
+                    metric_at=item["metric_at"],
+                    squad=item["squad"],
+                    cost=item["cost"],
+                    profit=item["profit"],
+                    revenue=item["revenue"],
+                    roi=item["roi"],
+                    checkout_conversion=item["checkout_conversion"],
+                )
+            )
+            inserted += 1
 
-    if not rows_to_insert:
-        return {"inserted": 0, "ignored": len(data)}
+        metric_date = item["metric_at"].astimezone(SAO_PAULO_TZ).date()
+        affected_summary_keys.add((metric_date, item["squad"]))
 
-    objects = [
-        MetricsSnapshot(
-            metric_at=item["metric_at"],
-            squad=item["squad"],
-            cost=item["cost"],
-            profit=item["profit"],
-            revenue=item["revenue"],
-            roi=item["roi"],
-        )
-        for item in rows_to_insert
-    ]
-
-    db.bulk_save_objects(objects)
+    _refresh_daily_summary(db, affected_summary_keys)
     db.commit()
+
     return {
-        "inserted": len(rows_to_insert),
-        "ignored": len(data) - len(rows_to_insert),
+        "inserted": inserted,
+        "updated": updated,
+        "ignored": max(len(data) - len(unique_payload), 0),
     }
+
 
 def get_summary(db: Session, source: str = None):
     sp_today = datetime.now(SAO_PAULO_TZ).date()
@@ -102,13 +155,13 @@ def get_summary(db: Session, source: str = None):
 
     query = """
         SELECT
-            timezone('America/Sao_Paulo', metric_at)::date as date,
+            metric_date as date,
             SUM(cost) as cost,
             SUM(profit) as profit,
             SUM(revenue) as revenue,
             ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
-        FROM tb_metrics_snapshots
-        WHERE timezone('America/Sao_Paulo', metric_at)::date IN (:sp_today, :sp_yesterday)
+        FROM tb_daily_metrics_summary
+        WHERE metric_date IN (:sp_today, :sp_yesterday)
     """
 
     params: dict[str, object] = {
@@ -120,18 +173,18 @@ def get_summary(db: Session, source: str = None):
         query += " AND UPPER(squad) = UPPER(:source)"
         params["source"] = source
 
-    query += " GROUP BY timezone('America/Sao_Paulo', metric_at)::date ORDER BY timezone('America/Sao_Paulo', metric_at)::date DESC"
+    query += " GROUP BY metric_date ORDER BY metric_date DESC"
 
     result = db.execute(text(query), params)
     rows = result.fetchall()
-    
+
     if not rows:
         return {
             "today": {"cost": None, "profit": None, "revenue": None, "roi": None},
             "yesterday": {"cost": None, "profit": None, "revenue": None, "roi": None},
             "comparison": {"cost_change": None, "profit_change": None, "revenue_change": None, "roi_change": None}
         }
-    
+
     today_data = None
     yesterday_data = None
     today_date = str(sp_today)
@@ -165,12 +218,11 @@ def get_summary(db: Session, source: str = None):
         }
     }
 
-    # Calcular variação percentual
     today_cost_value = float(today_data.cost) if (today_data and today_data.cost is not None) else 0.0
     today_profit_value = float(today_data.profit) if (today_data and today_data.profit is not None) else 0.0
     today_revenue_value = float(today_data.revenue) if (today_data and today_data.revenue is not None) else 0.0
     today_roi_value = float(today_data.roi) if (today_data and today_data.roi is not None) else 0.0
-    
+
     if yesterday_data:
         if yesterday_data.cost and yesterday_data.cost != 0:
             cost_change = ((today_cost_value - float(yesterday_data.cost)) / float(yesterday_data.cost)) * 100
@@ -190,6 +242,7 @@ def get_summary(db: Session, source: str = None):
 
     return result_obj
 
+
 def get_metrics_by_hour(db: Session, source: str = None):
     now_sp = datetime.now(SAO_PAULO_TZ)
     sp_today = now_sp.date()
@@ -205,11 +258,12 @@ def get_metrics_by_hour(db: Session, source: str = None):
                     ELSE 'yesterday'
                 END as day,
                 EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
+                SUM(checkout_conversion) as checkout_conversion,
                 SUM(cost) as cost,
                 SUM(profit) as profit,
                 SUM(revenue) as revenue,
                 ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
-            FROM tb_metrics_snapshots
+            FROM tb_hourly_metrics
             WHERE timezone('America/Sao_Paulo', metric_at)::date IN (:sp_today, :sp_yesterday)
               AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
             GROUP BY
@@ -234,6 +288,4 @@ def get_metrics_by_hour(db: Session, source: str = None):
     }
 
     result = db.execute(text(query), params)
-
-    rows = result.fetchall()
-    return rows
+    return result.fetchall()
