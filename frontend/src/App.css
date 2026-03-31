@@ -289,3 +289,160 @@ body {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
+
+/* Conversion Section */
+.conversionSection {
+  margin-top: 24px;
+}
+
+.conversionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.conversionTableContainer {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(9, 15, 30, 0.98));
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.35);
+  padding: 20px;
+}
+
+.conversionTableTitle {
+  margin: 0 0 16px;
+  font-size: 1.1rem;
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.conversionTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.conversionTable th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  color: #9ca3af;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.conversionTable td {
+  padding: 12px;
+  font-size: 0.9rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.conversionTable tr:last-child td {
+  border-bottom: none;
+}
+
+.conversionTableName {
+  color: #e5e7eb;
+  font-weight: 500;
+}
+
+.conversionTableNumber {
+  color: #9ca3af;
+  text-align: center;
+}
+
+.conversionTableRate {
+  font-weight: 700;
+  text-align: right;
+}
+
+.conversionTableLoading,
+.conversionTableEmpty {
+  padding: 24px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 0.92rem;
+}
+
+/* Squad Section */
+.squadSection {
+  margin-top: 24px;
+}
+
+.sectionTitle {
+  margin: 0 0 16px;
+  font-size: 1.2rem;
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.squadGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.squadCard {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(9, 15, 30, 0.98));
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 8px 16px rgba(2, 6, 23, 0.25);
+  padding: 16px;
+}
+
+.squadHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.squadName {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.squadConversion {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.squadMetrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.squadMetric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.squadMetricLabel {
+  font-size: 0.84rem;
+  color: #9ca3af;
+}
+
+.squadMetricValue {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+/* Responsive adjustments */
+@media (max-width: 980px) {
+  .conversionGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .squadGrid {
+    grid-template-columns: 1fr;
+  }
+}
