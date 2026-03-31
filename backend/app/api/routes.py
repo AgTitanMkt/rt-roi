@@ -4,7 +4,12 @@ from sqlalchemy.orm import Session
 from ..core.database import SessionLocal
 from ..schemas.metrics_schema import HourlyMetricResponse, SummaryResponse
 from ..services.redis_service import get_summary_cached, get_hourly_cached
-from ..services.metrics_service import get_metrics_by_period
+from ..services.metrics_service import (
+    get_metrics_by_period,
+    get_checkout_summary,
+    get_product_summary,
+    get_squad_checkout_summary,
+)
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -205,3 +210,146 @@ def get_hourly_period(
         }
         for row in rows
     ]
+
+
+@router.get(
+    "/by-checkout",
+    summary="Retorna conversão por checkout (Cartpanda, Clickbank)",
+    description=(
+        "Retorna as métricas de conversão agrupadas por checkout.\n\n"
+        "- `period`: 24h, daily, weekly, monthly\n"
+        "- `source` (opcional): filtra por squad"
+    ),
+    responses={
+        200: {
+            "description": "Conversões por checkout",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "checkout": "Cartpanda",
+                            "initiate_checkout": 150,
+                            "purchase": 45,
+                            "checkout_conversion": 30.0
+                        },
+                        {
+                            "checkout": "Clickbank",
+                            "initiate_checkout": 80,
+                            "purchase": 20,
+                            "checkout_conversion": 25.0
+                        }
+                    ]
+                }
+            },
+        }
+    },
+)
+def get_by_checkout(
+    period: str = Query(
+        default="24h",
+        description="Período: 24h, daily, weekly, monthly",
+        examples=["24h", "daily", "weekly", "monthly"],
+    ),
+    source: str | None = Query(
+        default=None,
+        description="Squad para filtrar os dados (ex.: FBR)",
+        examples=["FBR", "YTD"],
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna conversão por checkout (Cartpanda vs Clickbank).
+    """
+    return get_checkout_summary(db, source, period)
+
+
+@router.get(
+    "/by-product",
+    summary="Retorna conversão por produto",
+    description=(
+        "Retorna as métricas de conversão agrupadas por produto.\n\n"
+        "- `period`: 24h, daily, weekly, monthly\n"
+        "- `source` (opcional): filtra por squad"
+    ),
+    responses={
+        200: {
+            "description": "Conversões por produto",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "product": "ErosLift",
+                            "initiate_checkout": 120,
+                            "purchase": 36,
+                            "checkout_conversion": 30.0
+                        },
+                        {
+                            "product": "VitaBoost",
+                            "initiate_checkout": 100,
+                            "purchase": 25,
+                            "checkout_conversion": 25.0
+                        }
+                    ]
+                }
+            },
+        }
+    },
+)
+def get_by_product(
+    period: str = Query(
+        default="24h",
+        description="Período: 24h, daily, weekly, monthly",
+        examples=["24h", "daily", "weekly", "monthly"],
+    ),
+    source: str | None = Query(
+        default=None,
+        description="Squad para filtrar os dados (ex.: FBR)",
+        examples=["FBR", "YTD"],
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna conversão por produto.
+    """
+    return get_product_summary(db, source, period)
+
+
+@router.get(
+    "/by-squad",
+    summary="Retorna métricas por squad",
+    description=(
+        "Retorna as métricas de custo, lucro, ROI e conversão agrupadas por squad.\n\n"
+        "- `period`: 24h, daily, weekly, monthly"
+    ),
+    responses={
+        200: {
+            "description": "Métricas por squad",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "squad": "FBR",
+                            "cost": 5000.00,
+                            "profit": 2500.00,
+                            "revenue": 7500.00,
+                            "checkout_conversion": 28.5,
+                            "roi": 0.50
+                        }
+                    ]
+                }
+            },
+        }
+    },
+)
+def get_by_squad(
+    period: str = Query(
+        default="24h",
+        description="Período: 24h, daily, weekly, monthly",
+        examples=["24h", "daily", "weekly", "monthly"],
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna métricas agregadas por squad.
+    """
+    return get_squad_checkout_summary(db, period)
