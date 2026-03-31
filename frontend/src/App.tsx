@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import "./App.css";
 import ValorCard from "./componentes/ValorCard.tsx";
-import CardRoi from "./componentes/CardRoi.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
 import ConversionInsightsChart from "./componentes/ConversionInsightsChart.tsx";
 import {
@@ -147,12 +146,15 @@ function App() {
             sufixo="%"
             className="isHighlight"
           />
-          <CardRoi
+          <ValorCard
             nome="ROI"
             valor={formatMoney(today?.roi)}
             data={formatMoney(yesterday?.roi)}
             categoria={formatPercentage(comparison?.roi_change)}
             tendencia={(comparison?.roi_change ?? 0) < 0 ? "baixa" : "alta"}
+            prefixo=""
+            sufixo="%"
+            className="isHighlight"
           />
         </section>
       )}
