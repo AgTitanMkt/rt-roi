@@ -18,6 +18,7 @@ class CampaignInfo:
     """Informações extraídas da nomenclatura da campanha."""
     campaign_id: str
     campaign_name: str
+    offer_id: str | None = None
     squad: str = "unknown"
     checkout: str = "unknown"  # Cartpanda, Clickbank, etc.
     product: str = "unknown"   # ErosLift, etc.
@@ -42,13 +43,14 @@ class ConversionMetrics:
 class AggregatedConversions:
     """Conversões agregadas por diferentes dimensões."""
     by_campaign: dict[str, ConversionMetrics] = field(default_factory=dict)
+    campaign_info: dict[str, CampaignInfo] = field(default_factory=dict)
     by_squad: dict[str, ConversionMetrics] = field(default_factory=dict)
     by_checkout: dict[str, ConversionMetrics] = field(default_factory=dict)
     by_product: dict[str, ConversionMetrics] = field(default_factory=dict)
     total: ConversionMetrics = field(default_factory=ConversionMetrics)
 
 
-def extract_campaign_info(campaign_name: str, campaign_id: str = "") -> CampaignInfo:
+def extract_campaign_info(campaign_name: str, campaign_id: str = "", offer_id: str | None = None) -> CampaignInfo:
     """
     Extrai informações da nomenclatura da campanha.
     
@@ -66,6 +68,7 @@ def extract_campaign_info(campaign_name: str, campaign_id: str = "") -> Campaign
     
     info = CampaignInfo(
         campaign_id=campaign_id or campaign_name,
+        offer_id=(str(offer_id).strip() if offer_id else None),
         campaign_name=campaign_name,
     )
     
@@ -96,32 +99,65 @@ def extract_campaign_info(campaign_name: str, campaign_id: str = "") -> Campaign
 
 
 def _get_campaign_id(row: dict) -> str:
-    """Extrai o ID da campanha de uma linha de dados."""
+    """Extrai o identificador principal (campaign_id com fallback para offer_id)."""
     campaign = row.get("campaign")
     if isinstance(campaign, dict):
         nested_id = str(campaign.get("id") or campaign.get("campaign_id") or "").strip()
         if nested_id:
             return nested_id
 
+    campaign_id = str(row.get("campaign_id") or row.get("campaignId") or "").strip()
+    if campaign_id:
+        return campaign_id
+
+    offer = row.get("offer")
+    if isinstance(offer, dict):
+        nested_offer_id = str(offer.get("id") or offer.get("offer_id") or "").strip()
+        if nested_offer_id:
+            return nested_offer_id
+
     return str(
-        row.get("campaign_id")
-        or row.get("campaignId")
+        row.get("offer_id")
+        or row.get("offerId")
         or row.get("cid")
+        or row.get("oid")
         or row.get("id")
+        or row.get("offer")
         or row.get("campaign")
         or ""
     ).strip()
 
 
 def _get_campaign_name(row: dict) -> str:
-    """Extrai o nome da campanha de uma linha de dados."""
+    """Extrai nome principal (campaign com fallback para offer)."""
     campaign = row.get("campaign")
     if isinstance(campaign, dict):
         nested_name = str(campaign.get("name") or campaign.get("campaign_name") or "").strip()
         if nested_name:
             return nested_name
 
-    return str(row.get("campaign") or row.get("campaign_name") or "").strip()
+    campaign_name = str(row.get("campaign_name") or row.get("campaign") or "").strip()
+    if campaign_name:
+        return campaign_name
+
+    offer = row.get("offer")
+    if isinstance(offer, dict):
+        nested_offer_name = str(offer.get("name") or offer.get("offer_name") or "").strip()
+        if nested_offer_name:
+            return nested_offer_name
+
+    return str(row.get("offer_name") or row.get("offer") or "").strip()
+
+
+def _get_offer_id(row: dict) -> str | None:
+    offer = row.get("offer")
+    if isinstance(offer, dict):
+        nested_offer_id = str(offer.get("id") or offer.get("offer_id") or "").strip()
+        if nested_offer_id:
+            return nested_offer_id
+
+    offer_id = str(row.get("offer_id") or row.get("offerId") or row.get("oid") or "").strip()
+    return offer_id or None
 
 
 def _get_conversion_type(row: dict) -> Optional[str]:
@@ -283,12 +319,14 @@ async def _fallback_fetch_all_conversions_via_report(
                 continue
 
             campaign_name = _get_campaign_name(row)
+            offer_id = _get_offer_id(row)
             count = _get_event_count(row)
 
             if campaign_id not in campaign_info_cache:
-                campaign_info_cache[campaign_id] = extract_campaign_info(campaign_name, campaign_id)
+                campaign_info_cache[campaign_id] = extract_campaign_info(campaign_name, campaign_id, offer_id)
 
             info = campaign_info_cache[campaign_id]
+            result.campaign_info[campaign_id] = info
             result.by_campaign.setdefault(campaign_id, ConversionMetrics())
             result.by_squad.setdefault(info.squad, ConversionMetrics())
             result.by_checkout.setdefault(info.checkout, ConversionMetrics())
@@ -364,16 +402,19 @@ async def fetch_all_conversions(
                 continue
             
             campaign_name = _get_campaign_name(row)
+            offer_id = _get_offer_id(row)
             count = _get_event_count(row)
             
             # Extrair informações da campanha (usar cache para performance)
             if campaign_id not in campaign_info_cache:
                 campaign_info_cache[campaign_id] = extract_campaign_info(
                     campaign_name, 
-                    campaign_id
+                    campaign_id,
+                    offer_id,
                 )
             
             info = campaign_info_cache[campaign_id]
+            result.campaign_info[campaign_id] = info
             
             # Agregar por campanha
             if campaign_id not in result.by_campaign:

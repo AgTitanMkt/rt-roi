@@ -11,7 +11,6 @@ import {
   Legend,
   ReferenceLine,
 } from "recharts";
-import { RechartsDevtools } from "@recharts/devtools";
 import type { HourlyMetric, SquadOption } from "../utils/reqs.ts";
 
 const MAX_CHART_POINTS = 24;
@@ -217,67 +216,27 @@ const DashboardGrafico = ({
   );
 
   return (
-    <div
-      style={{
-        width: "100%",
-        maxWidth: "980px",
-        margin: "12px auto",
-        background: "#01091a",
-        padding: "clamp(12px, 2.5vw, 20px)",
-        borderRadius: "12px",
-        color: "white",
-        fontFamily: "sans-serif",
-        boxSizing: "border-box",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: "16px",
-          gap: "12px",
-        }}
-      >
+    <div className="chartContainer ui-card">
+      <div className="chartHeader">
         <div>
-          <h2 style={{ fontSize: "clamp(14px, 2.8vw, 16px)", margin: 0 }}>
+          <h2 className="chartTitle">
             Performance Analitica
           </h2>
-          <small style={{ color: "#9ca3af" }}>
+          <small className="chartSubtitle">
             {period === "24h" && "Últimas 24 horas"}
             {period === "daily" && "Hoje"}
             {period === "weekly" && "Esta semana"}
             {period === "monthly" && "Este mês"}
           </small>
         </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            flexWrap: "wrap",
-            justifyContent: "flex-end",
-            width: "100%",
-            maxWidth: "420px",
-          }}
-        >
-          <small style={{ color: "#9ca3af" }}>
+        <div className="chartHeaderControls">
+          <small className="chartMeta">
             {isLoading ? "Atualizando..." : `${dadosUnificados.length} pontos`}
           </small>
           <select
             value={selectedSquad}
             onChange={(event) => onSquadChange(event.target.value)}
-            style={{
-              background: "#111827",
-              border: "1px solid #374151",
-              color: "#e5e7eb",
-              borderRadius: "8px",
-              fontSize: "12px",
-              padding: "6px 10px",
-              width: "min(220px, 100%)",
-              minWidth: "150px",
-            }}
+            className="ui-select"
           >
             {squadOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -288,21 +247,14 @@ const DashboardGrafico = ({
         </div>
       </div>
 
-      <div style={{ width: "100%", height: "clamp(240px, 52vw, 360px)" }}>
+      <div className="chartCanvas">
         {dadosUnificados.length === 0 ? (
-          <p style={{ fontSize: "12px", color: "#9ca3af" }}>
+          <p className="chartEmptyState">
             Sem dados para exibir no grafico.
           </p>
         ) : (
           <>
-            <p
-              style={{
-                fontSize: "12px",
-                color: "#2563eb",
-                marginBottom: "5px",
-                fontWeight: "bold",
-              }}
-            >
+            <p className="chartDescription">
               {period === "24h" && "Gasto, Faturamento e ROI Por Hora"}
               {period === "daily" && "Gasto, Faturamento e ROI Por Hora do Dia"}
               {period === "weekly" && "Gasto, Faturamento e ROI Por Dia da Semana"}
@@ -318,7 +270,7 @@ const DashboardGrafico = ({
               <CartesianGrid
                 strokeDasharray="3 3"
                 vertical={false}
-                stroke="#1f2937"
+                stroke="rgba(51, 65, 85, 0.55)"
               />
               <XAxis
                 dataKey="xKey"
@@ -326,13 +278,13 @@ const DashboardGrafico = ({
                   const entry = dadosUnificados.find((item) => item.xKey === value);
                   return entry?.axisLabel ?? String(value);
                 }}
-                tick={{ fill: "#9ca3af", fontSize: 10 }}
+                tick={{ fill: "#94a3b8", fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
               />
               <YAxis
                 yAxisId="valores"
-                tick={{ fill: "#9ca3af", fontSize: 10 }}
+                tick={{ fill: "#94a3b8", fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
               />
@@ -341,8 +293,8 @@ const DashboardGrafico = ({
                 shared={false}
                 labelFormatter={(value) => tooltipLabels.get(String(value)) ?? String(value)}
                 contentStyle={{
-                  backgroundColor: "#111827",
-                  border: "1px solid #1f2937",
+                  backgroundColor: "#0f172a",
+                  border: "1px solid #334155",
                   borderRadius: "8px",
                 }}
                 formatter={(value, key) => {
@@ -366,7 +318,7 @@ const DashboardGrafico = ({
                 }}
               />
               <Legend
-                wrapperStyle={{ fontSize: "11px", color: "#9ca3af" }}
+                wrapperStyle={{ fontSize: "11px", color: "#94a3b8" }}
                 formatter={(value: string) => {
                   if (value === "checkout") return "Checkout";
                   if (value === "gasto") return "Gasto";
@@ -427,7 +379,6 @@ const DashboardGrafico = ({
                 activeDot={{ r: 5, strokeWidth: 0 }}
                 connectNulls
               />
-              <RechartsDevtools />
             </ComposedChart>
           </ResponsiveContainer>
           </>

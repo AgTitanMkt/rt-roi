@@ -132,6 +132,7 @@ def insert_metrics(db: Session, data: list):
 
         unique_payload[(campaign_id, metric_at)] = {
             "campaign_id": campaign_id,
+            "offer_id": str(item.get("offer_id") or "").strip() or None,
             "metric_at": metric_at,
             "squad": _normalize_squad(item.get("squad")),
             "checkout": str(item.get("checkout") or "unknown").strip() or "unknown",
@@ -209,6 +210,7 @@ def insert_metrics(db: Session, data: list):
     for key, item in unique_payload.items():
         existing = existing_by_key.get(key)
         if existing:
+            existing.offer_id = item["offer_id"]
             existing.squad = item["squad"]
             existing.checkout = item["checkout"]
             existing.product = item["product"]
@@ -222,6 +224,7 @@ def insert_metrics(db: Session, data: list):
             db.add(
                 HourlyMetric(
                     campaign_id=item["campaign_id"],
+                    offer_id=item["offer_id"],
                     metric_at=item["metric_at"],
                     squad=item["squad"],
                     checkout=item["checkout"],
@@ -676,6 +679,74 @@ def get_squad_checkout_summary(db: Session, period: str = "24h"):
             "revenue": float(row.revenue or 0),
             "checkout_conversion": float(row.checkout_conversion or 0),
             "roi": float(row.roi or 0),
+        }
+        for row in rows
+    ]
+
+
+def get_conversion_breakdown(
+    db: Session,
+    *,
+    period: str = "24h",
+    squad: str | None = None,
+    checkout: str | None = None,
+    product: str | None = None,
+) -> list[dict[str, object]]:
+    if not _table_exists(db, "tb_daily_conversion_entities"):
+        return []
+
+    sp_today = datetime.now(SAO_PAULO_TZ).date()
+
+    if period == "weekly":
+        date_start = sp_today - timedelta(days=6)
+        date_end = sp_today
+    elif period == "monthly":
+        date_start = sp_today - timedelta(days=29)
+        date_end = sp_today
+    else:  # 24h ou daily
+        date_start = sp_today
+        date_end = sp_today
+
+    query = """
+        SELECT
+            squad,
+            checkout,
+            product,
+            SUM(initiate_checkout) AS initiate_checkout,
+            SUM(purchase) AS purchase,
+            CASE
+                WHEN SUM(initiate_checkout) > 0
+                THEN ROUND((SUM(purchase)::numeric / SUM(initiate_checkout)) * 100, 2)
+                ELSE 0
+            END AS checkout_conversion
+        FROM tb_daily_conversion_entities
+        WHERE metric_date BETWEEN :date_start AND :date_end
+          AND (:squad IS NULL OR UPPER(squad) = UPPER(:squad))
+          AND (:checkout IS NULL OR UPPER(checkout) = UPPER(:checkout))
+          AND (:product IS NULL OR UPPER(product) = UPPER(:product))
+        GROUP BY squad, checkout, product
+        ORDER BY purchase DESC, initiate_checkout DESC
+    """
+
+    rows = db.execute(
+        text(query),
+        {
+            "date_start": date_start,
+            "date_end": date_end,
+            "squad": squad,
+            "checkout": checkout,
+            "product": product,
+        },
+    ).fetchall()
+
+    return [
+        {
+            "squad": str(row.squad or "unknown"),
+            "checkout": str(row.checkout or "unknown"),
+            "product": str(row.product or "unknown"),
+            "initiate_checkout": int(row.initiate_checkout or 0),
+            "purchase": int(row.purchase or 0),
+            "checkout_conversion": float(row.checkout_conversion or 0),
         }
         for row in rows
     ]

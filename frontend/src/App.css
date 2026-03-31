@@ -1,17 +1,7 @@
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: radial-gradient(circle at top right, #1d2a44 0%, #050b19 42%, #020617 100%);
-  color: #e5e7eb;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
+/* base styles moved to index.css */
 
 .dashboardShell {
-  width: min(1120px, 94vw);
+  width: min(1160px, 94vw);
   margin: 0 auto;
   padding: 28px 0 42px;
 }
@@ -20,20 +10,35 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 14px;
-  margin-bottom: 16px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.dashboardHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .dashboardTitle {
-  margin: 0;
-  font-size: clamp(1.3rem, 2vw, 1.8rem);
+  font-size: clamp(1.4rem, 2vw, 1.9rem);
   letter-spacing: 0.2px;
 }
 
 .dashboardSubtitle {
-  margin: 6px 0 0;
-  color: #9ca3af;
+  margin-top: 6px;
+  color: var(--text-muted);
   font-size: 0.92rem;
+}
+
+.filterGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.filterGroup .ui-select {
+  min-width: 160px;
 }
 
 .statusPill {
@@ -41,13 +46,12 @@ body {
   padding: 8px 14px;
   font-size: 0.84rem;
   font-weight: 600;
-  white-space: nowrap;
   border: 1px solid transparent;
 }
 
 .statusPill.isOnline {
-  background: rgba(16, 185, 129, 0.14);
-  border-color: rgba(16, 185, 129, 0.28);
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.3);
   color: #86efac;
 }
 
@@ -61,26 +65,47 @@ body {
   background: rgba(239, 68, 68, 0.16);
   color: #fca5a5;
   border: 1px solid rgba(248, 113, 113, 0.32);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 10px 14px;
   font-size: 0.9rem;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-2);
 }
 
 .cardsGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .CardInfo {
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(9, 15, 30, 0.98));
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.35);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
   padding: 16px;
-  min-height: 130px;
+  min-height: 128px;
+}
+
+.kpiSkeleton {
+  min-height: 128px;
+  position: relative;
+  overflow: hidden;
+}
+
+.kpiSkeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.14), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 .cardHeader {
@@ -91,15 +116,15 @@ body {
 }
 
 .nameInfo {
-  font-size: 0.86rem;
-  color: #9ca3af;
+  font-size: 0.8rem;
+  color: var(--text-muted);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
 
 .trendBadge {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 700;
   padding: 4px 8px;
   border-radius: 999px;
@@ -114,13 +139,13 @@ body {
 
 .trendBadge.cor-sucesso {
   color: #86efac;
-  background: rgba(16, 185, 129, 0.14);
-  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.35);
 }
 
 .valorInfo {
   font-size: clamp(1.45rem, 2.5vw, 1.9rem);
-  color: #f8fafc;
+  color: var(--text-title);
   line-height: 1.2;
   margin-bottom: 12px;
   font-weight: 700;
@@ -130,11 +155,11 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 0.86rem;
+  font-size: 0.84rem;
 }
 
 .dataLabel {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .dataValue {
@@ -145,304 +170,193 @@ body {
 .chartPanel {
   display: flex;
   justify-content: center;
+  margin-bottom: var(--space-3);
+}
+
+.chartContainer {
+  width: 100%;
+  max-width: 980px;
+  margin: 12px auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
+  padding: clamp(12px, 2.5vw, 20px);
+}
+
+.chartHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.chartTitle {
+  font-size: clamp(0.92rem, 2.2vw, 1.1rem);
+}
+
+.chartSubtitle,
+.chartMeta {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.chartHeaderControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  width: 100%;
+  max-width: 420px;
+}
+
+.chartCanvas {
+  width: 100%;
+  height: clamp(300px, 46vw, 380px);
+}
+
+.chartDescription {
+  font-size: 0.76rem;
+  color: var(--color-primary);
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+
+.chartEmptyState {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding-top: 32px;
+}
+
+.conversionSection {
+  margin-top: var(--space-3);
+}
+
+.conversionChartSection {
+  margin-bottom: 18px;
+}
+
+.conversionChartHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 1.14rem;
+  color: var(--text-title);
+  font-weight: 600;
+}
+
+.conversionChartSubtitle {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.conversionChartFilters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+  width: min(100%, 560px);
+}
+
+.conversionChartFilters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+}
+
+.conversionChartFilters select {
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-color);
+  color: var(--text-body);
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+  padding: 8px 10px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.conversionChartFilters select:hover {
+  filter: brightness(1.05);
+}
+
+.conversionChartFilters select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.conversionChartCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
+  padding: 16px;
+}
+
+.conversionChartCanvas {
+  width: 100%;
+  height: clamp(300px, 42vw, 380px);
+}
+
+.conversionChartEmpty {
+  padding: 28px 14px;
+  margin: 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.92rem;
 }
 
 @media (max-width: 980px) {
+  .dashboardHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dashboardHeaderActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .cardsGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
+  }
+
+  .conversionChartHeader {
+    flex-direction: column;
+  }
+
+  .conversionChartFilters {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
 }
 
 @media (max-width: 720px) {
-  .dashboardHeader {
-    flex-direction: column;
-    align-items: flex-start;
+  .cardsGrid {
+    grid-template-columns: 1fr;
   }
 
   .statusPill {
     white-space: normal;
   }
 
-  .cardsGrid {
-    grid-template-columns: 1fr;
+  .dashboardHeaderActions {
+    flex-direction: column;
+    align-items: stretch;
   }
-}
 
-/* Nav*/
-
-.navbar-container {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 24px;
-  background-color: #01091a;
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-}
-
-.logo-container img {
-  height: 32px;
-}
-
-.pill-selector {
-  display: flex;
-  align-items: center;
-  background-color: #01091a;
-  border-radius: 9999px;
-  padding: 4px;
-  border: 1px solid #e5e7eb;
-}
-
-.nav-button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 24px;
-  border-radius: 9999px;
-  font-weight: 500;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background-color: transparent;
-  color: #6b7280; 
-}
-
-.nav-button:hover:not(.active) {
-  color: #374151;
-}
-
-.nav-button.active {
-  background-color: #2563eb; 
-  color: #ffffff;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-}
-
-.actions-container {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.settings-btn {
-  background: transparent;
-  border: none;
-  padding: 8px;
-  color: #6b7280;
-  border-radius: 9999px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  transition: background 0.2s;
-}
-
-.settings-btn:hover {
-  background-color: #f3f4f6;
-}
-
-.profile-img-wrapper {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid #e5e7eb;
-  background-color: #f9fafb;
-}
-
-.profile-img-wrapper img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.filterGroup {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.filterGroup label {
-  font-size: 0.92rem;
-  color: #e5e7eb;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.filterGroup select {
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid #374151;
-  background-color: #1f2937;
-  color: #e5e7eb;
-  font-size: 0.92rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-width: 140px;
-}
-
-.filterGroup select:hover {
-  border-color: #4b5563;
-  background-color: #111827;
-}
-
-.filterGroup select:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-/* Conversion Section */
-.conversionSection {
-  margin-top: 24px;
-}
-
-.conversionGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-}
-
-.conversionTableContainer {
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(9, 15, 30, 0.98));
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.35);
-  padding: 20px;
-}
-
-.conversionTableTitle {
-  margin: 0 0 16px;
-  font-size: 1.1rem;
-  color: #f8fafc;
-  font-weight: 600;
-}
-
-.conversionTable {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.conversionTable th {
-  text-align: left;
-  padding: 10px 12px;
-  font-size: 0.78rem;
-  color: #9ca3af;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-}
-
-.conversionTable td {
-  padding: 12px;
-  font-size: 0.9rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-}
-
-.conversionTable tr:last-child td {
-  border-bottom: none;
-}
-
-.conversionTableName {
-  color: #e5e7eb;
-  font-weight: 500;
-}
-
-.conversionTableNumber {
-  color: #9ca3af;
-  text-align: center;
-}
-
-.conversionTableRate {
-  font-weight: 700;
-  text-align: right;
-}
-
-.conversionTableLoading,
-.conversionTableEmpty {
-  padding: 24px;
-  text-align: center;
-  color: #6b7280;
-  font-size: 0.92rem;
-}
-
-/* Squad Section */
-.squadSection {
-  margin-top: 24px;
-}
-
-.sectionTitle {
-  margin: 0 0 16px;
-  font-size: 1.2rem;
-  color: #f8fafc;
-  font-weight: 600;
-}
-
-.squadGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
-}
-
-.squadCard {
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(9, 15, 30, 0.98));
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  box-shadow: 0 8px 16px rgba(2, 6, 23, 0.25);
-  padding: 16px;
-}
-
-.squadHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.squadName {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #f8fafc;
-}
-
-.squadConversion {
-  font-size: 1.3rem;
-  font-weight: 700;
-}
-
-.squadMetrics {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.squadMetric {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.squadMetricLabel {
-  font-size: 0.84rem;
-  color: #9ca3af;
-}
-
-.squadMetricValue {
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: #e5e7eb;
-}
-
-/* Responsive adjustments */
-@media (max-width: 980px) {
-  .conversionGrid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 720px) {
-  .squadGrid {
+  .conversionChartFilters {
     grid-template-columns: 1fr;
   }
 }

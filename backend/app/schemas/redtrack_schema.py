@@ -8,6 +8,7 @@ class RedtrackReportItem(BaseModel):
     """Schema para um item individual do relatório Redtrack"""
 
     campaign_id: str = Field(..., description="ID da campanha no Redtrack")
+    offer_id: str | None = Field(default=None, description="ID da oferta no Redtrack")
     date: datetime = Field(..., description="Data e hora do relatório com timezone (America/Sao_Paulo)")
     cost: float = Field(..., description="Custo em moeda")
     squad: str = Field(..., description="Squad")
@@ -22,6 +23,7 @@ class RedtrackReportItem(BaseModel):
         json_schema_extra = {
             "example": {
                 "campaign_id": "1as23456",
+                "offer_id": "off-999",
                 "squad": "YTD",
                 "checkout": "Cartpanda",
                 "product": "ErosLift",

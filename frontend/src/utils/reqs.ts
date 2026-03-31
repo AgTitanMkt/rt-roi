@@ -76,6 +76,15 @@ export interface SquadMetric {
   roi: number;
 }
 
+export interface ConversionBreakdownMetric {
+  squad: string;
+  checkout: string;
+  product: string;
+  initiate_checkout: number;
+  purchase: number;
+  checkout_conversion: number;
+}
+
 interface HealthResponse {
   status: string;
 }
@@ -92,6 +101,7 @@ interface UseDashboardDataResult {
   checkouts: CheckoutMetric[];
   products: ProductMetric[];
   squads: SquadMetric[];
+  conversionBreakdown: ConversionBreakdownMetric[];
   isHealthy: boolean;
   isLoading: boolean;
   error: string | null;
@@ -160,9 +170,26 @@ export const fetchSquadMetrics = (period: string = "24h"): Promise<SquadMetric[]
   return fetchJson<SquadMetric[]>(`/metrics/by-squad?period=${period}`);
 };
 
+export const fetchConversionBreakdown = (
+  period: string = "24h",
+): Promise<ConversionBreakdownMetric[]> => {
+  return fetchJson<ConversionBreakdownMetric[]>(`/metrics/conversion-breakdown?period=${period}`);
+};
+
 export const checkBackendHealth = async (): Promise<boolean> => {
   const health = await fetchJson<HealthResponse>("/health");
   return health.status === "ok";
+};
+
+export const useDebouncedValue = <T>(value: T, delayMs = 250): T => {
+  const [debounced, setDebounced] = useState<T>(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timeout);
+  }, [value, delayMs]);
+
+  return debounced;
 };
 
 export const useDashboardData = ({
@@ -175,6 +202,7 @@ export const useDashboardData = ({
   const [checkouts, setCheckouts] = useState<CheckoutMetric[]>([]);
   const [products, setProducts] = useState<ProductMetric[]>([]);
   const [squads, setSquads] = useState<SquadMetric[]>([]);
+  const [conversionBreakdown, setConversionBreakdown] = useState<ConversionBreakdownMetric[]>([]);
   const [isHealthy, setIsHealthy] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -188,12 +216,13 @@ export const useDashboardData = ({
       const healthy = await checkBackendHealth().catch(() => false);
       setIsHealthy(healthy);
 
-      const [summaryResult, hourlyResult, checkoutsResult, productsResult, squadsResult] = await Promise.allSettled([
+      const [summaryResult, hourlyResult, checkoutsResult, productsResult, squadsResult, breakdownResult] = await Promise.allSettled([
         fetchSummary(squad, period),
         fetchHourly(squad, period),
         fetchCheckoutMetrics(squad, period),
         fetchProductMetrics(squad, period),
         fetchSquadMetrics(period),
+        fetchConversionBreakdown(period),
       ]);
 
       const errors: string[] = [];
@@ -230,6 +259,12 @@ export const useDashboardData = ({
         setSquads([]);
       }
 
+      if (breakdownResult.status === "fulfilled") {
+        setConversionBreakdown(breakdownResult.value);
+      } else {
+        setConversionBreakdown([]);
+      }
+
       if (errors.length > 0) {
         setError(errors.join(" | "));
       }
@@ -261,6 +296,7 @@ export const useDashboardData = ({
     checkouts,
     products,
     squads,
+    conversionBreakdown,
     isHealthy,
     isLoading,
     error,

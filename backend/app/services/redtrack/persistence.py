@@ -11,6 +11,7 @@ def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
             "id": item.campaign_id,
+            "offer_id": item.offer_id,
             "squad": item.squad,
             "checkout": item.checkout,
             "product": item.product,

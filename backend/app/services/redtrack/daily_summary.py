@@ -6,7 +6,7 @@ from typing import Optional
 import httpx
 
 from ...core.database import SessionLocal
-from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSummary
+from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSummary, DailyConversionEntity
 from ..metrics_service import get_summary as get_summary_metrics
 from .conversions import AggregatedConversions
 from .http_client import make_request_with_retry
@@ -83,8 +83,10 @@ def persist_daily_summary_snapshot(
     by_squad: dict[str, dict[str, Decimal | int]] = {}
     
     for row in rows:
-        campaign_name = str(row.get("campaign") or "")
-        squad = _extract_squad_from_campaign_name(campaign_name)
+        campaign_name = str(row.get("campaign") or row.get("campaign_name") or "")
+        offer_name = str(row.get("offer") or row.get("offer_name") or "")
+        source_name = campaign_name or offer_name
+        squad = _extract_squad_from_campaign_name(source_name)
         
         if squad not in by_squad:
             by_squad[squad] = {
@@ -100,17 +102,23 @@ def persist_daily_summary_snapshot(
         by_squad[squad]["revenue"] += _q2(float(row.get("revenue", 0) or 0))
 
         campaign_id = str(row.get("campaign_id") or row.get("campaignId") or row.get("campaign") or "").strip()
-        if campaign_id:
+        offer_id = str(row.get("offer_id") or row.get("offerId") or row.get("offer") or "").strip()
+
+        identifier_candidates = [value for value in (campaign_id, offer_id) if value]
+        for identifier in identifier_candidates:
             # Usar eventos do formato legado se disponível
-            if events_by_campaign and campaign_id in events_by_campaign:
-                events = events_by_campaign[campaign_id]
+            if events_by_campaign and identifier in events_by_campaign:
+                events = events_by_campaign[identifier]
                 by_squad[squad]["initiate"] += int(events.get("InitiateCheckout", 0) or 0)
                 by_squad[squad]["purchase"] += int(events.get("Purchase", 0) or 0)
+                break
+
             # Ou usar o novo formato de conversions
-            elif conversions and campaign_id in conversions.by_campaign:
-                metrics = conversions.by_campaign[campaign_id]
+            if conversions and identifier in conversions.by_campaign:
+                metrics = conversions.by_campaign[identifier]
                 by_squad[squad]["initiate"] += metrics.initiate_checkout
                 by_squad[squad]["purchase"] += metrics.purchase
+                break
 
     db = SessionLocal()
     try:
@@ -168,6 +176,7 @@ def persist_daily_summary_snapshot(
 
         # Persistir sumário por checkout (Cartpanda, Clickbank) se tiver conversions
         if conversions:
+            _persist_conversion_breakdown(db, metric_date, conversions)
             _persist_checkout_summary(db, metric_date, conversions)
             _persist_product_summary(db, metric_date, conversions)
 
@@ -274,6 +283,60 @@ def _persist_checkout_summary(
         "📊 Checkout Summary: %s checkouts persistidos",
         len([c for c in conversions.by_checkout.keys() if c != "unknown"])
     )
+
+
+def _persist_conversion_breakdown(
+    db,
+    metric_date: date,
+    conversions: AggregatedConversions,
+) -> None:
+    """Persiste conversão por entidade (campaign_id + offer_id) com dimensões."""
+    persisted = 0
+
+    for campaign_id, metrics in conversions.by_campaign.items():
+        info = conversions.campaign_info.get(campaign_id)
+        if not info:
+            continue
+
+        squad = (info.squad or "unknown").strip() or "unknown"
+        checkout = (info.checkout or "unknown").strip() or "unknown"
+        product = (info.product or "unknown").strip() or "unknown"
+
+        existing = db.query(DailyConversionEntity).filter(
+            DailyConversionEntity.metric_date == metric_date,
+            DailyConversionEntity.campaign_id == campaign_id,
+        ).one_or_none()
+
+        initiate_total = int(metrics.initiate_checkout or 0)
+        purchase_total = int(metrics.purchase or 0)
+        conversion_rate = _q2((purchase_total / initiate_total) * 100 if initiate_total > 0 else 0)
+
+        if existing:
+            existing.offer_id = info.offer_id
+            existing.squad = squad
+            existing.checkout = checkout
+            existing.product = product
+            existing.initiate_checkout = _q0(initiate_total)
+            existing.purchase = _q0(purchase_total)
+            existing.checkout_conversion = conversion_rate
+        else:
+            db.add(
+                DailyConversionEntity(
+                    metric_date=metric_date,
+                    campaign_id=campaign_id,
+                    offer_id=info.offer_id,
+                    squad=squad,
+                    checkout=checkout,
+                    product=product,
+                    initiate_checkout=_q0(initiate_total),
+                    purchase=_q0(purchase_total),
+                    checkout_conversion=conversion_rate,
+                )
+            )
+
+        persisted += 1
+
+    logger.info("📊 Breakdown Summary: %s combinações persistidas", persisted)
 
 
 def _persist_product_summary(

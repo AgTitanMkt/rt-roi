@@ -61,3 +61,13 @@ class SquadSummaryItem(BaseModel):
     checkout_conversion: float = Field(..., examples=[28.5], description="Taxa de conversao em %")
     roi: float = Field(..., examples=[0.5], description="ROI agregado")
 
+
+class ConversionBreakdownItem(BaseModel):
+    squad: str = Field(..., examples=["FBR"], description="Squad")
+    checkout: str = Field(..., examples=["Cartpanda"], description="Checkout")
+    product: str = Field(..., examples=["ErosLift"], description="Produto")
+    initiate_checkout: int = Field(..., examples=[120], description="Volume de initiate checkout")
+    purchase: int = Field(..., examples=[36], description="Volume de purchase")
+    checkout_conversion: float = Field(..., examples=[30.0], description="Taxa de conversao em %")
+
+

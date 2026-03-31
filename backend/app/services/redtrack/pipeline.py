@@ -95,9 +95,15 @@ async def redtrack_reports() -> RedtrackResponse:
                 if not raw_date:
                     continue
 
+                offer_name = str(row.get("offer") or row.get("offer_name") or "").strip()
                 campaign_name = str(row.get("campaign") or "").strip()
-                campaign_id = str(row.get("campaign_id") or row.get("campaignId") or campaign_name).strip()
-                if not campaign_id:
+                source_name = campaign_name or offer_name
+
+                offer_id = str(row.get("offer_id") or row.get("offerId") or "").strip()
+                campaign_id = str(row.get("campaign_id") or row.get("campaignId") or "").strip()
+                primary_id = campaign_id or offer_id or source_name
+
+                if not primary_id:
                     continue
 
                 report_datetime = datetime.strptime(raw_date, "%Y-%m-%d").replace(
@@ -109,10 +115,11 @@ async def redtrack_reports() -> RedtrackResponse:
                 )
 
                 # Extrair informações da campanha usando a função padronizada
-                campaign_info = extract_campaign_info(campaign_name, campaign_id)
+                campaign_info = extract_campaign_info(source_name, primary_id, offer_id or None)
 
                 item = RedtrackReportItem(
-                    campaign_id=campaign_id,
+                    campaign_id=primary_id,
+                    offer_id=offer_id or None,
                     squad=campaign_info.squad,
                     checkout=campaign_info.checkout,
                     product=campaign_info.product,
@@ -125,7 +132,7 @@ async def redtrack_reports() -> RedtrackResponse:
                 )
 
                 data.append(item)
-                campaign_ids_seen.add(campaign_id)
+                campaign_ids_seen.add(primary_id)
                 profit_total += profit
                 cost_total += cost
 
@@ -133,7 +140,7 @@ async def redtrack_reports() -> RedtrackResponse:
                     "   [%s/%s] %s | squad=%s | checkout=%s | product=%s | cost=%.2f | profit=%.2f",
                     idx,
                     len(page_rows),
-                    campaign_id,
+                    primary_id,
                     campaign_info.squad,
                     campaign_info.checkout,
                     campaign_info.product,
@@ -185,8 +192,21 @@ async def redtrack_reports() -> RedtrackResponse:
             )
 
         if conversions:
+            offer_by_campaign_id = (
+                {
+                    campaign_id: info.offer_id
+                    for campaign_id, info in (aggregated_conversions.campaign_info.items() if aggregated_conversions else [])
+                }
+                if aggregated_conversions
+                else {}
+            )
             data = [
-                item.model_copy(update={"conversion": conversions.get(item.campaign_id, 0.0)})
+                item.model_copy(
+                    update={
+                        "conversion": conversions.get(item.campaign_id, conversions.get(item.offer_id or "", 0.0)),
+                        "offer_id": item.offer_id or offer_by_campaign_id.get(item.campaign_id),
+                    }
+                )
                 if item.campaign_id in campaign_ids_seen
                 else item
                 for item in data

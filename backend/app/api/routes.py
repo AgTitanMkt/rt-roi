@@ -8,6 +8,7 @@ from ..schemas.metrics_schema import (
     CheckoutSummaryItem,
     ProductSummaryItem,
     SquadSummaryItem,
+    ConversionBreakdownItem,
 )
 from ..services.redis_service import get_summary_cached, get_hourly_cached
 from ..services.metrics_service import (
@@ -15,6 +16,7 @@ from ..services.metrics_service import (
     get_checkout_summary,
     get_product_summary,
     get_squad_checkout_summary,
+    get_conversion_breakdown,
 )
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
@@ -364,3 +366,36 @@ def get_by_squad(
     Retorna métricas agregadas por squad.
     """
     return get_squad_checkout_summary(db, period)
+
+
+@router.get(
+    "/conversion-breakdown",
+    summary="Retorna conversão por combinação de squad, checkout e produto",
+    description=(
+        "Retorna volume e taxa de conversão com filtros opcionais combináveis.\n\n"
+        "- `period`: 24h, daily, weekly, monthly\n"
+        "- `squad` (opcional)\n"
+        "- `checkout` (opcional)\n"
+        "- `product` (opcional)"
+    ),
+    response_model=list[ConversionBreakdownItem],
+)
+def get_conversion_breakdown_route(
+    period: str = Query(
+        default="24h",
+        description="Período: 24h, daily, weekly, monthly",
+        examples=["24h", "daily", "weekly", "monthly"],
+    ),
+    squad: str | None = Query(default=None, description="Filtro opcional de squad"),
+    checkout: str | None = Query(default=None, description="Filtro opcional de checkout"),
+    product: str | None = Query(default=None, description="Filtro opcional de produto"),
+    db: Session = Depends(get_db),
+):
+    return get_conversion_breakdown(
+        db,
+        period=period,
+        squad=squad,
+        checkout=checkout,
+        product=product,
+    )
+

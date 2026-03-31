@@ -3,10 +3,11 @@ import "./App.css";
 import ValorCard from "./componentes/ValorCard.tsx";
 import CardRoi from "./componentes/CardRoi.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
-import ConversionTable from "./componentes/ConversionTable.tsx";
+import ConversionInsightsChart from "./componentes/ConversionInsightsChart.tsx";
 import {
   DEFAULT_SQUAD,
   SQUAD_OPTIONS,
+  useDebouncedValue,
   useDashboardData,
 } from "./utils/reqs.ts";
 
@@ -34,10 +35,12 @@ const getChangePercent = (current: number, previous: number): number => {
 function App() {
   const [selectedSquad, setSelectedSquad] = useState<string>(DEFAULT_SQUAD);
   const [selectedPeriod, setSelectedPeriod] = useState<"24h" | "daily" | "weekly" | "monthly">("24h");
-  const backendSquad = selectedSquad === DEFAULT_SQUAD ? undefined : selectedSquad;
+  const debouncedSquad = useDebouncedValue(selectedSquad, 250);
+  const debouncedPeriod = useDebouncedValue(selectedPeriod, 250);
+  const backendSquad = debouncedSquad === DEFAULT_SQUAD ? undefined : debouncedSquad;
 
-  const { summary, hourly, checkouts, products, squads, isHealthy, isLoading, error, lastUpdated } =
-    useDashboardData({ squad: backendSquad, period: selectedPeriod });
+  const { summary, hourly, conversionBreakdown, isHealthy, isLoading, error, lastUpdated } =
+    useDashboardData({ squad: backendSquad, period: debouncedPeriod });
 
   const today = summary?.today;
   const yesterday = summary?.yesterday;
@@ -74,27 +77,18 @@ function App() {
       <header className="dashboardHeader">
         <div>
           <h1 className="dashboardTitle">Dashboard de Performance</h1>
-          <p className="dashboardSubtitle">Visao consolidada de custo, lucro e ROI</p>
+          <p className="dashboardSubtitle">Visao consolidada para decisao rapida de performance</p>
         </div>
-        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+        <div className="dashboardHeaderActions">
           <div className="filterGroup">
-            <label htmlFor="period-select" style={{ marginRight: "8px", fontWeight: 500 }}>
+            <label htmlFor="period-select" className="ui-label">
               Período:
             </label>
             <select
               id="period-select"
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value as "24h" | "daily" | "weekly" | "monthly")}
-              style={{
-                background: "#111827",
-                border: "1px solid #374151",
-                color: "#e5e7eb",
-                borderRadius: "8px",
-                fontSize: "12px",
-                padding: "6px 10px",
-                width: "min(220px, 100%)",
-                minWidth: "150px",
-              }}
+              className="ui-select"
             >
               <option value="24h">Últimas 24h</option>
               <option value="daily">Diário</option>
@@ -114,47 +108,54 @@ function App() {
 
       {error && <div className="errorBanner">Erro: {error}</div>}
 
-      <section className="cardsGrid">
-        <ValorCard
-          nome="Gasto"
-          valor={formatMoney(today?.cost)}
-          data={formatMoney(yesterday?.cost)}
-          categoria={formatPercentage(comparison?.cost_change)}
-          tendencia={(comparison?.cost_change ?? 0) < 0 ? "baixa" : "alta"}
-        />
-        <ValorCard
-          nome="Faturamento"
-          valor={formatMoney(todayRevenue)}
-          data={formatMoney(yesterdayRevenue)}
-          categoria={formatPercentage(resolvedRevenueChange)}
-          tendencia={resolvedRevenueChange < 0 ? "baixa" : "alta"}
-        />
-        <ValorCard
-          nome="Lucro"
-          valor={formatMoney(today?.profit)}
-          data={formatMoney(yesterday?.profit)}
-          categoria={formatPercentage(comparison?.profit_change)}
-          tendencia={(comparison?.profit_change ?? 0) < 0 ? "baixa" : "alta"}
-        />
-        <ValorCard
-          nome="Checkout"
-          valor={formatMoney(checkoutToday)}
-          data={formatMoney(checkoutYesterday)}
-          categoria={formatPercentage(checkoutChange)}
-          tendencia={checkoutChange < 0 ? "baixa" : "alta"}
-          prefixo=""
-          sufixo="%"
-          className="isHighlight"
-        />
-        <CardRoi
-          nome="ROI"
-          valor={formatMoney(today?.roi)}
-          data={formatMoney(yesterday?.roi)}
-          categoria={formatPercentage(comparison?.roi_change)}
-          tendencia={(comparison?.roi_change ?? 0) < 0 ? "baixa" : "alta"}
-        />
-
-      </section>
+      {isLoading && !summary ? (
+        <section className="cardsGrid" aria-busy="true">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div key={`skeleton-${index}`} className="kpiSkeleton ui-card" />
+          ))}
+        </section>
+      ) : (
+        <section className="cardsGrid">
+          <ValorCard
+            nome="Gasto"
+            valor={formatMoney(today?.cost)}
+            data={formatMoney(yesterday?.cost)}
+            categoria={formatPercentage(comparison?.cost_change)}
+            tendencia={(comparison?.cost_change ?? 0) < 0 ? "baixa" : "alta"}
+          />
+          <ValorCard
+            nome="Faturamento"
+            valor={formatMoney(todayRevenue)}
+            data={formatMoney(yesterdayRevenue)}
+            categoria={formatPercentage(resolvedRevenueChange)}
+            tendencia={resolvedRevenueChange < 0 ? "baixa" : "alta"}
+          />
+          <ValorCard
+            nome="Lucro"
+            valor={formatMoney(today?.profit)}
+            data={formatMoney(yesterday?.profit)}
+            categoria={formatPercentage(comparison?.profit_change)}
+            tendencia={(comparison?.profit_change ?? 0) < 0 ? "baixa" : "alta"}
+          />
+          <ValorCard
+            nome="Checkout"
+            valor={formatMoney(checkoutToday)}
+            data={formatMoney(checkoutYesterday)}
+            categoria={formatPercentage(checkoutChange)}
+            tendencia={checkoutChange < 0 ? "baixa" : "alta"}
+            prefixo=""
+            sufixo="%"
+            className="isHighlight"
+          />
+          <CardRoi
+            nome="ROI"
+            valor={formatMoney(today?.roi)}
+            data={formatMoney(yesterday?.roi)}
+            categoria={formatPercentage(comparison?.roi_change)}
+            tendencia={(comparison?.roi_change ?? 0) < 0 ? "baixa" : "alta"}
+          />
+        </section>
+      )}
 
       <section className="chartPanel">
         <DashboardGrafico1
@@ -168,74 +169,9 @@ function App() {
       </section>
 
       <section className="conversionSection">
-        <div className="conversionGrid">
-          <ConversionTable
-            title="🛒 Conversão por Checkout"
-            data={checkouts.map((c) => ({
-              name: c.checkout,
-              initiate_checkout: c.initiate_checkout,
-              purchase: c.purchase,
-              checkout_conversion: c.checkout_conversion,
-            }))}
-            isLoading={isLoading}
-            emptyMessage="Nenhum dado de checkout disponível"
-          />
-          
-          <ConversionTable
-            title="📦 Conversão por Produto"
-            data={products.map((p) => ({
-              name: p.product,
-              initiate_checkout: p.initiate_checkout,
-              purchase: p.purchase,
-              checkout_conversion: p.checkout_conversion,
-            }))}
-            isLoading={isLoading}
-            emptyMessage="Nenhum dado de produto disponível"
-          />
-        </div>
+        <ConversionInsightsChart data={conversionBreakdown} isLoading={isLoading} />
       </section>
 
-      {squads.length > 0 && (
-        <section className="squadSection">
-          <h2 className="sectionTitle">📊 Performance por Squad</h2>
-          <div className="squadGrid">
-            {squads.map((squad) => (
-              <div key={squad.squad} className="squadCard">
-                <div className="squadHeader">
-                  <span className="squadName">{squad.squad}</span>
-                  <span 
-                    className="squadConversion"
-                    style={{ 
-                      color: squad.checkout_conversion >= 25 ? "#22c55e" : 
-                             squad.checkout_conversion >= 15 ? "#eab308" : "#ef4444" 
-                    }}
-                  >
-                    {squad.checkout_conversion.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="squadMetrics">
-                  <div className="squadMetric">
-                    <span className="squadMetricLabel">Gasto</span>
-                    <span className="squadMetricValue">R$ {squad.cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="squadMetric">
-                    <span className="squadMetricLabel">Lucro</span>
-                    <span className="squadMetricValue" style={{ color: squad.profit >= 0 ? "#22c55e" : "#ef4444" }}>
-                      R$ {squad.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="squadMetric">
-                    <span className="squadMetricLabel">ROI</span>
-                    <span className="squadMetricValue" style={{ color: squad.roi >= 0 ? "#22c55e" : "#ef4444" }}>
-                      {(squad.roi * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
