@@ -320,7 +320,6 @@ async def redtrack_reports() -> RedtrackResponse:
         "group": "campaign,date",
         "date_from": date_from,
         "date_to": date_to,
-        "time_interval": "lasthour",
         "timezone": "America/Sao_Paulo",
         "per": 1000,
         "page": 1,

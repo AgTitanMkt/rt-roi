@@ -80,15 +80,15 @@ const DashboardGrafico = ({
 
   // Função para gerar chave consistente para cada período
   const getConsistentKey = (item: HourlyMetric, period: "24h" | "daily" | "weekly" | "monthly"): string => {
-    const date = item.slot ? new Date(`${String(item.slot).slice(0, 10)}T12:00:00`) : new Date();
-
     if (period === "24h" || period === "daily") {
-      const hour = String(date.getHours()).padStart(2, "0");
-      const day = date.toLocaleDateString("pt-BR");
+      const day = item.slot ? String(item.slot).slice(0, 10) : "unknown-day";
+      const hour = String(item.hour ?? "0").padStart(2, "0");
       return `${day}_${hour}`;
     } else if (period === "weekly") {
+      const date = item.slot ? new Date(`${String(item.slot).slice(0, 10)}T12:00:00`) : new Date();
       return date.toLocaleDateString("pt-BR", { weekday: "long", month: "2-digit", day: "2-digit" });
     } else {
+      const date = item.slot ? new Date(`${String(item.slot).slice(0, 10)}T12:00:00`) : new Date();
       return date.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
     }
   };

@@ -1,5 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, date
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -97,6 +98,46 @@ def insert_metrics(db: Session, data: list):
 
     if not unique_payload:
         return {"inserted": 0, "updated": 0, "ignored": len(data)}
+
+    previous_targets: list[tuple[str, datetime]] = []
+    for campaign_id, metric_at in unique_payload.keys():
+        metric_at_sp = metric_at.astimezone(SAO_PAULO_TZ)
+        if metric_at_sp.hour == 0:
+            continue
+        previous_targets.append((campaign_id, metric_at - timedelta(hours=1)))
+
+    previous_by_key: dict[tuple[object, object], Any] = {}
+    if previous_targets:
+        previous_campaign_ids = list({campaign_id for campaign_id, _ in previous_targets})
+        previous_metric_ats = list({metric_at for _, metric_at in previous_targets})
+        previous_rows = db.query(HourlyMetric).filter(
+            HourlyMetric.campaign_id.in_(previous_campaign_ids),
+            HourlyMetric.metric_at.in_(previous_metric_ats),
+        ).all()
+        for row in previous_rows:
+            previous_by_key[(row.campaign_id, row.metric_at)] = row
+
+    for key, item in unique_payload.items():
+        metric_at = item["metric_at"]
+        metric_at_sp = metric_at.astimezone(SAO_PAULO_TZ)
+        if metric_at_sp.hour == 0:
+            continue
+
+        previous_row = previous_by_key.get((item["campaign_id"], metric_at - timedelta(hours=1)))
+        if not previous_row:
+            continue
+
+        for field, prev_raw in (
+            ("cost", previous_row.cost),
+            ("profit", previous_row.profit),
+            ("revenue", previous_row.revenue),
+            ("checkout_conversion", previous_row.checkout_conversion),
+        ):
+            current_value = Decimal(str(item[field] or 0))
+            previous_value = Decimal(str(prev_raw or 0))
+            item[field] = _q2(max(current_value - previous_value, Decimal("0")))
+
+        item["roi"] = _q4((item["profit"] / item["cost"]) if item["cost"] > 0 else 0)
 
     campaign_ids = list({k[0] for k in unique_payload})
     metric_ats = list({k[1] for k in unique_payload})
