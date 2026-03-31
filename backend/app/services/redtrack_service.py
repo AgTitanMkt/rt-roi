@@ -32,16 +32,17 @@ REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
 REDTRACK_URL = "https://api.redtrack.io/report"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
-
 def persist_metrics_report(data: RedtrackResponse) -> None:
     payload = [
         {
+            "id": item.campaign_id,
             "squad": item.squad,
             "metric_at": item.date,
             "cost": item.cost,
             "profit": item.profit,
             "revenue": item.revenue,
             "roi": item.roi,
+            "checkout_conversion": item.conversion,
         }
         for item in data
     ]
@@ -53,7 +54,10 @@ def persist_metrics_report(data: RedtrackResponse) -> None:
     try:
         result = insert_metrics(db, payload)
         print(
-            f"Persistencia finalizada: inseridos={result['inserted']} ignorados={result['ignored']}"
+            "Persistencia finalizada: "
+            f"inseridos={result['inserted']} "
+            f"atualizados={result['updated']} "
+            f"ignorados={result['ignored']}"
         )
     finally:
         db.close()
@@ -106,6 +110,15 @@ async def redtrack_reports() -> RedtrackResponse:
                 if not raw_date:
                     continue
 
+                campaign_name = str(x.get("campaign") or "").strip()
+                campaign_id = str(
+                    x.get("campaign_id")
+                    or x.get("campaignId")
+                    or campaign_name
+                ).strip()
+                if not campaign_id:
+                    continue
+
                 report_datetime = datetime.strptime(raw_date, "%Y-%m-%d").replace(
                     # lasthour sempre representa a ultima hora fechada na timezone configurada.
                     hour=last_closed_hour.hour,
@@ -116,19 +129,24 @@ async def redtrack_reports() -> RedtrackResponse:
                 )
 
                 if cost > 0 and profit != 0:
-                    campaign = str(x.get("campaign") or "").strip()
-                    campaign_parts = [part.strip() for part in campaign.split("|") if part.strip()]
+                    campaign_parts = [part.strip() for part in campaign_name.split("|") if part.strip()]
 
                     responsible = campaign_parts[1] if len(campaign_parts) > 1 else (campaign_parts[0] if campaign_parts else "unknown")
                     squad = responsible.split("-")[0]
 
                     res_data = RedtrackReportItem(
+                        campaign_id=campaign_id,
                         squad=squad,
                         date=report_datetime,
                         cost=cost,
                         revenue=float(x.get("revenue", 0) or 0),
                         profit=profit,
                         roi=float(x.get("roi", 0) or 0),
+                        conversion=float(
+                            x.get("conversion")
+                            or x.get("checkout_conversion")
+                            or 0
+                        ),
                     )
 
                     data.append(res_data)
