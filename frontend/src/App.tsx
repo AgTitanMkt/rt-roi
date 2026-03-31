@@ -116,12 +116,14 @@ function App() {
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value as "24h" | "daily" | "weekly" | "monthly")}
               style={{
-                padding: "8px 12px",
-                borderRadius: "4px",
-                border: "1px solid #ddd",
-                backgroundColor: "#fff",
-                cursor: "pointer",
-                fontSize: "14px",
+                background: "#111827",
+                border: "1px solid #374151",
+                color: "#e5e7eb",
+                borderRadius: "8px",
+                fontSize: "12px",
+                padding: "6px 10px",
+                width: "min(220px, 100%)",
+                minWidth: "150px",
               }}
             >
               <option value="24h">Últimas 24h</option>
