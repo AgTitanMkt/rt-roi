@@ -223,6 +223,7 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
                 SUM(cost) as cost,
                 SUM(profit) as profit,
                 SUM(revenue) as revenue,
+                ROUND(AVG(checkout_conversion), 2) as checkout,
                 ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
             FROM tb_daily_metrics_summary
             WHERE metric_date BETWEEN :start_date AND :end_date
@@ -247,18 +248,21 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
             "cost": _q2(getattr(current_data, "cost", 0) or 0),
             "profit": _q2(getattr(current_data, "profit", 0) or 0),
             "revenue": _q2(getattr(current_data, "revenue", 0) or 0),
+            "checkout": _q2(getattr(current_data, "checkout", 0) or 0),
             "roi": _q4(getattr(current_data, "roi", 0) or 0),
         },
         "yesterday": {
             "cost": _q2(getattr(previous_data, "cost", 0) or 0),
             "profit": _q2(getattr(previous_data, "profit", 0) or 0),
             "revenue": _q2(getattr(previous_data, "revenue", 0) or 0),
+            "checkout": _q2(getattr(previous_data, "checkout", 0) or 0),
             "roi": _q4(getattr(previous_data, "roi", 0) or 0),
         },
         "comparison": {
             "cost_change": 0,
             "profit_change": 0,
             "revenue_change": 0,
+            "checkout_change": 0,
             "roi_change": 0,
         }
     }
@@ -266,11 +270,13 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
     current_cost = float(getattr(current_data, "cost", 0) or 0)
     current_profit = float(getattr(current_data, "profit", 0) or 0)
     current_revenue = float(getattr(current_data, "revenue", 0) or 0)
+    current_checkout = float(getattr(current_data, "checkout", 0) or 0)
     current_roi = float(getattr(current_data, "roi", 0) or 0)
 
     previous_cost = float(getattr(previous_data, "cost", 0) or 0)
     previous_profit = float(getattr(previous_data, "profit", 0) or 0)
     previous_revenue = float(getattr(previous_data, "revenue", 0) or 0)
+    previous_checkout = float(getattr(previous_data, "checkout", 0) or 0)
     previous_roi = float(getattr(previous_data, "roi", 0) or 0)
 
     if previous_cost != 0:
@@ -279,6 +285,8 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
         result_obj["comparison"]["profit_change"] = _q2(((current_profit - previous_profit) / abs(previous_profit)) * 100)
     if previous_revenue != 0:
         result_obj["comparison"]["revenue_change"] = _q2(((current_revenue - previous_revenue) / abs(previous_revenue)) * 100)
+    if previous_checkout != 0:
+        result_obj["comparison"]["checkout_change"] = _q2(((current_checkout - previous_checkout) / abs(previous_checkout)) * 100)
     if previous_roi != 0:
         result_obj["comparison"]["roi_change"] = _q2(((current_roi - previous_roi) / abs(previous_roi)) * 100)
 
