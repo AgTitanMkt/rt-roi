@@ -102,7 +102,16 @@ const DashboardGrafico = ({
           return 0;
         }
 
-        return (parsedHour + 24) % 24;
+        return (parsedHour + 1 + 24) % 24;
+      };
+
+      const shiftSlotForward = (slotValue: string): Date | null => {
+        const parsed = new Date(slotValue);
+        if (Number.isNaN(parsed.getTime())) {
+          return null;
+        }
+
+        return new Date(parsed.getTime() + 60 * 60 * 1000);
       };
 
       const getOrderValue = (item: HourlyMetric): number => {
@@ -135,7 +144,14 @@ const DashboardGrafico = ({
           return getAxisLabel(item);
         }
 
-        const parsed = new Date(item.slot);
+        const parsed = period === "24h" || period === "daily"
+          ? shiftSlotForward(item.slot)
+          : new Date(item.slot);
+
+        if (!parsed) {
+          return item.slot;
+        }
+
         if (Number.isNaN(parsed.getTime())) {
           return item.slot;
         }

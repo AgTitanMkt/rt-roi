@@ -92,15 +92,15 @@ def invalidate_metrics_cache():
     return deleted
 
 
-def get_summary_cached(db, source=None):
+def get_summary_cached(db, source=None, period="24h"):
     source = _normalize_source(source)
-    cache_key = f"summary:{source or 'all'}"
+    cache_key = f"summary:{period}:{source or 'all'}"
 
     cached = _cache_get(cache_key)
     if _is_summary_payload(cached):
         return cached
 
-    data = get_summary(db, source)
+    data = get_summary(db, source, period)
     payload = _to_jsonable(data)
     _cache_set(cache_key, payload)
     return payload

@@ -9,6 +9,27 @@ import {
   useDashboardData,
 } from "./utils/reqs.ts";
 
+const resolveRevenue = (metrics?: {
+  revenue?: number | null;
+  cost?: number | null;
+  profit?: number | null;
+  roi?: number | null;
+}): number => {
+  if (!metrics) return 0;
+  if (metrics.revenue != null) return metrics.revenue;
+  if (metrics.cost != null && metrics.profit != null) return metrics.cost + metrics.profit;
+  if (metrics.cost != null && metrics.roi != null) return metrics.cost * (1 + metrics.roi);
+  return 0;
+};
+
+const getChangePercent = (current: number, previous: number): number => {
+  if (previous === 0) {
+    return current === 0 ? 0 : 100;
+  }
+
+  return ((current - previous) / Math.abs(previous)) * 100;
+};
+
 
 function App() {
   const [selectedSquad, setSelectedSquad] = useState<string>(DEFAULT_SQUAD);
@@ -22,25 +43,11 @@ function App() {
   const yesterday = summary?.yesterday;
   const comparison = summary?.comparison;
 
-  const resolveRevenue = (metrics?: {
-    revenue?: number | null;
-    cost?: number | null;
-    profit?: number | null;
-    roi?: number | null;
-  }): number => {
-    if (!metrics) return 0;
-    if (metrics.revenue != null) return metrics.revenue;
-    if (metrics.cost != null && metrics.profit != null) return metrics.cost + metrics.profit;
-    if (metrics.cost != null && metrics.roi != null) return metrics.cost * (1 + metrics.roi);
-    return 0;
-  };
-
   const todayRevenue = resolveRevenue(today);
   const yesterdayRevenue = resolveRevenue(yesterday);
 
   const resolvedRevenueChange =
-    comparison?.revenue_change ??
-    (yesterdayRevenue !== 0 ? ((todayRevenue - yesterdayRevenue) / Math.abs(yesterdayRevenue)) * 100 : 0);
+    comparison?.revenue_change ?? getChangePercent(todayRevenue, yesterdayRevenue);
 
   const hourlyWithResolvedRevenue = useMemo(
     () =>
@@ -52,46 +59,28 @@ function App() {
   );
 
   const checkoutTotals = useMemo(() => {
-    const toDateKey = (input: Date): string => {
-      const year = input.getFullYear();
-      const month = String(input.getMonth() + 1).padStart(2, "0");
-      const day = String(input.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    };
-
-    const todayKey = toDateKey(new Date());
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayKey = toDateKey(yesterday);
-
-    const totals = hourly.reduce(
+    const grouped = hourlyWithResolvedRevenue.reduce(
       (acc, item) => {
         const value = Number(item.checkout_conversion ?? 0);
-        const slotKey = String(item.slot ?? "").slice(0, 10);
-
-        if (slotKey === yesterdayKey || item.day === "yesterday") {
+        if (item.day === "yesterday") {
           acc.yesterdaySum += value;
           acc.yesterdayCount += 1;
-        } else if (slotKey === todayKey || item.day === "today") {
+        } else if (item.day === "today") {
           acc.todaySum += value;
           acc.todayCount += 1;
         }
-
         return acc;
       },
       { todaySum: 0, todayCount: 0, yesterdaySum: 0, yesterdayCount: 0 },
     );
 
     return {
-      today: totals.todayCount > 0 ? totals.todaySum / totals.todayCount : 0,
-      yesterday: totals.yesterdayCount > 0 ? totals.yesterdaySum / totals.yesterdayCount : 0,
+      today: grouped.todayCount > 0 ? grouped.todaySum / grouped.todayCount : 0,
+      yesterday: grouped.yesterdayCount > 0 ? grouped.yesterdaySum / grouped.yesterdayCount : 0,
     };
-  }, [hourly]);
+  }, [hourlyWithResolvedRevenue]);
 
-  const checkoutChange =
-    checkoutTotals.yesterday !== 0
-      ? ((checkoutTotals.today - checkoutTotals.yesterday) / Math.abs(checkoutTotals.yesterday)) * 100
-      : 0;
+  const checkoutChange = getChangePercent(checkoutTotals.today, checkoutTotals.yesterday);
 
   const formatMoney = (value: number | undefined): number =>
     Number((value ?? 0).toFixed(2));
@@ -116,12 +105,14 @@ function App() {
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value as "24h" | "daily" | "weekly" | "monthly")}
               style={{
-                padding: "8px 12px",
-                borderRadius: "4px",
-                border: "1px solid #ddd",
-                backgroundColor: "#fff",
-                cursor: "pointer",
-                fontSize: "14px",
+                background: "#111827",
+                border: "1px solid #374151",
+                color: "#e5e7eb",
+                borderRadius: "8px",
+                fontSize: "12px",
+                padding: "6px 10px",
+                width: "min(220px, 100%)",
+                minWidth: "150px",
               }}
             >
               <option value="24h">Últimas 24h</option>

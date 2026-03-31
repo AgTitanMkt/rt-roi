@@ -36,7 +36,7 @@ def _refresh_daily_summary(db: Session, affected_keys: set[tuple[date, str]]) ->
             func.coalesce(func.sum(HourlyMetric.cost), 0).label("cost"),
             func.coalesce(func.sum(HourlyMetric.profit), 0).label("profit"),
             func.coalesce(func.sum(HourlyMetric.revenue), 0).label("revenue"),
-            func.coalesce(func.sum(HourlyMetric.checkout_conversion), 0).label("checkout_conversion"),
+            func.coalesce(func.sum(HourlyMetric.checkout_conversion), 1).label("checkout_conversion"),
         ).filter(
             HourlyMetric.metric_at >= day_start,
             HourlyMetric.metric_at < day_end,
@@ -46,7 +46,7 @@ def _refresh_daily_summary(db: Session, affected_keys: set[tuple[date, str]]) ->
         cost = _q2(getattr(agg, "cost", 0))
         profit = _q2(getattr(agg, "profit", 0))
         revenue = _q2(getattr(agg, "revenue", 0))
-        checkout_conversion = _q2(getattr(agg, "checkout_conversion", 0))
+        checkout_conversion = _q2(getattr(agg, "checkout_conversion", 1))
         roi = _q4((profit / cost) if cost > 0 else 0)
 
         summary_row = db.query(DailySummary).filter(
@@ -94,17 +94,22 @@ def insert_metrics(db: Session, data: list):
             "revenue": _q2(item.get("revenue")),
             "roi": _q4(item.get("roi")),
             "checkout_conversion": _q2(item.get("checkout_conversion")),
+            # Delta logic is applied only when source values are cumulative.
+            "is_cumulative": bool(item.get("is_cumulative", False)),
         }
 
     if not unique_payload:
         return {"inserted": 0, "updated": 0, "ignored": len(data)}
 
     previous_targets: list[tuple[str, datetime]] = []
-    for campaign_id, metric_at in unique_payload.keys():
+    for _, item in unique_payload.items():
+        metric_at = item["metric_at"]
         metric_at_sp = metric_at.astimezone(SAO_PAULO_TZ)
+        if not item["is_cumulative"]:
+            continue
         if metric_at_sp.hour == 0:
             continue
-        previous_targets.append((campaign_id, metric_at - timedelta(hours=1)))
+        previous_targets.append((item["campaign_id"], metric_at - timedelta(hours=1)))
 
     previous_by_key: dict[tuple[object, object], Any] = {}
     if previous_targets:
@@ -120,6 +125,8 @@ def insert_metrics(db: Session, data: list):
     for key, item in unique_payload.items():
         metric_at = item["metric_at"]
         metric_at_sp = metric_at.astimezone(SAO_PAULO_TZ)
+        if not item["is_cumulative"]:
+            continue
         if metric_at_sp.hour == 0:
             continue
 
@@ -190,96 +197,90 @@ def insert_metrics(db: Session, data: list):
     }
 
 
-def get_summary(db: Session, source: str = None):
+def get_summary(db: Session, source: str = None, period: str = "24h"):
     sp_today = datetime.now(SAO_PAULO_TZ).date()
-    sp_yesterday = sp_today - timedelta(days=1)
 
-    query = """
-        SELECT
-            metric_date as date,
-            SUM(cost) as cost,
-            SUM(profit) as profit,
-            SUM(revenue) as revenue,
-            ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
-        FROM tb_daily_metrics_summary
-        WHERE metric_date IN (:sp_today, :sp_yesterday)
-    """
+    if period == "weekly":
+        current_start = sp_today - timedelta(days=6)
+        current_end = sp_today
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=6)
+    elif period == "monthly":
+        current_start = sp_today - timedelta(days=29)
+        current_end = sp_today
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=29)
+    else:
+        # 24h/daily seguem o comportamento original (hoje vs ontem)
+        current_start = sp_today
+        current_end = sp_today
+        previous_start = sp_today - timedelta(days=1)
+        previous_end = sp_today - timedelta(days=1)
 
-    params: dict[str, object] = {
-        "sp_today": sp_today,
-        "sp_yesterday": sp_yesterday,
-    }
+    def _fetch_range_agg(start_date: date, end_date: date):
+        query = """
+            SELECT
+                SUM(cost) as cost,
+                SUM(profit) as profit,
+                SUM(revenue) as revenue,
+                ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
+            FROM tb_daily_metrics_summary
+            WHERE metric_date BETWEEN :start_date AND :end_date
+        """
 
-    if source:
-        query += " AND UPPER(squad) = UPPER(:source)"
-        params["source"] = source
-
-    query += " GROUP BY metric_date ORDER BY metric_date DESC"
-
-    result = db.execute(text(query), params)
-    rows = result.fetchall()
-
-    if not rows:
-        return {
-            "today": {"cost": None, "profit": None, "revenue": None, "roi": None},
-            "yesterday": {"cost": None, "profit": None, "revenue": None, "roi": None},
-            "comparison": {"cost_change": None, "profit_change": None, "revenue_change": None, "roi_change": None}
+        params: dict[str, object] = {
+            "start_date": start_date,
+            "end_date": end_date,
         }
 
-    today_data = None
-    yesterday_data = None
-    today_date = str(sp_today)
-    yesterday_date = str(sp_yesterday)
+        if source:
+            query += " AND UPPER(squad) = UPPER(:source)"
+            params["source"] = source
 
-    for row in rows:
-        if row.date and str(row.date) == today_date:
-            today_data = row
-        elif row.date and str(row.date) == yesterday_date:
-            yesterday_data = row
+        return db.execute(text(query), params).fetchone()
+
+    current_data = _fetch_range_agg(current_start, current_end)
+    previous_data = _fetch_range_agg(previous_start, previous_end)
 
     result_obj = {
         "today": {
-            "cost": _q2(today_data.cost) if today_data else None,
-            "profit": _q2(today_data.profit) if today_data else None,
-            "revenue": _q2(today_data.revenue) if today_data else None,
-            "roi": _q4(today_data.roi) if today_data else None,
-
+            "cost": _q2(getattr(current_data, "cost", 0) or 0),
+            "profit": _q2(getattr(current_data, "profit", 0) or 0),
+            "revenue": _q2(getattr(current_data, "revenue", 0) or 0),
+            "roi": _q4(getattr(current_data, "roi", 0) or 0),
         },
         "yesterday": {
-            "cost": _q2(yesterday_data.cost) if yesterday_data else None,
-            "profit": _q2(yesterday_data.profit) if yesterday_data else None,
-            "revenue": _q2(yesterday_data.revenue) if yesterday_data else None,
-            "roi": _q4(yesterday_data.roi) if yesterday_data else None,
+            "cost": _q2(getattr(previous_data, "cost", 0) or 0),
+            "profit": _q2(getattr(previous_data, "profit", 0) or 0),
+            "revenue": _q2(getattr(previous_data, "revenue", 0) or 0),
+            "roi": _q4(getattr(previous_data, "roi", 0) or 0),
         },
         "comparison": {
-            "cost_change": None,
-            "profit_change": None,
-            "revenue_change": None,
-            "roi_change": None
+            "cost_change": 0,
+            "profit_change": 0,
+            "revenue_change": 0,
+            "roi_change": 0,
         }
     }
 
-    today_cost_value = float(today_data.cost) if (today_data and today_data.cost is not None) else 0.0
-    today_profit_value = float(today_data.profit) if (today_data and today_data.profit is not None) else 0.0
-    today_revenue_value = float(today_data.revenue) if (today_data and today_data.revenue is not None) else 0.0
-    today_roi_value = float(today_data.roi) if (today_data and today_data.roi is not None) else 0.0
+    current_cost = float(getattr(current_data, "cost", 0) or 0)
+    current_profit = float(getattr(current_data, "profit", 0) or 0)
+    current_revenue = float(getattr(current_data, "revenue", 0) or 0)
+    current_roi = float(getattr(current_data, "roi", 0) or 0)
 
-    if yesterday_data:
-        if yesterday_data.cost and yesterday_data.cost != 0:
-            cost_change = ((today_cost_value - float(yesterday_data.cost)) / float(yesterday_data.cost)) * 100
-            result_obj["comparison"]["cost_change"] = _q2(cost_change)
+    previous_cost = float(getattr(previous_data, "cost", 0) or 0)
+    previous_profit = float(getattr(previous_data, "profit", 0) or 0)
+    previous_revenue = float(getattr(previous_data, "revenue", 0) or 0)
+    previous_roi = float(getattr(previous_data, "roi", 0) or 0)
 
-        if yesterday_data.profit and yesterday_data.profit != 0:
-            profit_change = ((today_profit_value - float(yesterday_data.profit)) / float(yesterday_data.profit)) * 100
-            result_obj["comparison"]["profit_change"] = _q2(profit_change)
-
-        if yesterday_data.roi and yesterday_data.roi != 0:
-            roi_change = ((today_roi_value - float(yesterday_data.roi)) / float(yesterday_data.roi)) * 100
-            result_obj["comparison"]["roi_change"] = _q2(roi_change)
-
-        if yesterday_data.revenue and yesterday_data.revenue != 0:
-            revenue_change = ((today_revenue_value - float(yesterday_data.revenue)) / float(yesterday_data.revenue)) * 100
-            result_obj["comparison"]["revenue_change"] = _q2(revenue_change)
+    if previous_cost != 0:
+        result_obj["comparison"]["cost_change"] = _q2(((current_cost - previous_cost) / abs(previous_cost)) * 100)
+    if previous_profit != 0:
+        result_obj["comparison"]["profit_change"] = _q2(((current_profit - previous_profit) / abs(previous_profit)) * 100)
+    if previous_revenue != 0:
+        result_obj["comparison"]["revenue_change"] = _q2(((current_revenue - previous_revenue) / abs(previous_revenue)) * 100)
+    if previous_roi != 0:
+        result_obj["comparison"]["roi_change"] = _q2(((current_roi - previous_roi) / abs(previous_roi)) * 100)
 
     return result_obj
 
