@@ -206,7 +206,12 @@ async def _fetch_all_events(
         logger.debug(f"      Página {page}: {len(rows)} InitiateCheckout recebidos")
         
         for row in rows:
-            campaign_id = str(row.get("campaign_id") or row.get("campaignId") or "").strip()
+            campaign_id = str(
+                row.get("campaign_id")
+                or row.get("campaignId")
+                or row.get("campaign")
+                or ""
+            ).strip()
             if campaign_id:
                 if campaign_id not in events_by_campaign:
                     events_by_campaign[campaign_id] = {"InitiateCheckout": 0, "Purchase": 0}
@@ -242,7 +247,12 @@ async def _fetch_all_events(
         logger.debug(f"      Página {page}: {len(rows)} Purchase recebidos")
         
         for row in rows:
-            campaign_id = str(row.get("campaign_id") or row.get("campaignId") or "").strip()
+            campaign_id = str(
+                row.get("campaign_id")
+                or row.get("campaignId")
+                or row.get("campaign")
+                or ""
+            ).strip()
             if campaign_id:
                 if campaign_id not in events_by_campaign:
                     events_by_campaign[campaign_id] = {"InitiateCheckout": 0, "Purchase": 0}
@@ -279,12 +289,12 @@ async def _calculate_conversions(
         initiate = events.get("InitiateCheckout", 0)
         purchase = events.get("Purchase", 0)
         
-        if purchase == 0:
+        if initiate == 0:
             conversion = 0.0
-            logger.debug(f"   ⚠️  {campaign_id}: sem Purchase, conversion=0.0")
+            logger.debug(f"   ⚠️  {campaign_id}: sem InitiateCheckout, conversion=0.0")
         else:
-            conversion = initiate / purchase
-            logger.debug(f"   ✅ {campaign_id}: {initiate}/{purchase} = {conversion:.4f}")
+            conversion = (purchase / initiate) * 100
+            logger.debug(f"   ✅ {campaign_id}: ({purchase}/{initiate}) * 100 = {conversion:.2f}%")
         
         conversions[campaign_id] = conversion
     
@@ -310,7 +320,6 @@ async def redtrack_reports() -> RedtrackResponse:
         "group": "campaign,date",
         "date_from": date_from,
         "date_to": date_to,
-        "time_interval": "lasthour",
         "timezone": "America/Sao_Paulo",
         "per": 1000,
         "page": 1,

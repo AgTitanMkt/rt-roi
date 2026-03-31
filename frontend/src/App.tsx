@@ -12,10 +12,11 @@ import {
 
 function App() {
   const [selectedSquad, setSelectedSquad] = useState<string>(DEFAULT_SQUAD);
+  const [selectedPeriod, setSelectedPeriod] = useState<"24h" | "daily" | "weekly" | "monthly">("24h");
   const backendSquad = selectedSquad === DEFAULT_SQUAD ? undefined : selectedSquad;
 
   const { summary, hourly, isHealthy, isLoading, error, lastUpdated } =
-    useDashboardData({ squad: backendSquad });
+    useDashboardData({ squad: backendSquad, period: selectedPeriod });
 
   const today = summary?.today;
   const yesterday = summary?.yesterday;
@@ -51,18 +52,40 @@ function App() {
   );
 
   const checkoutTotals = useMemo(() => {
-    return hourly.reduce(
+    const toDateKey = (input: Date): string => {
+      const year = input.getFullYear();
+      const month = String(input.getMonth() + 1).padStart(2, "0");
+      const day = String(input.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    };
+
+    const todayKey = toDateKey(new Date());
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = toDateKey(yesterday);
+
+    const totals = hourly.reduce(
       (acc, item) => {
         const value = Number(item.checkout_conversion ?? 0);
-        if (item.day === "yesterday") {
-          acc.yesterday += value;
-        } else {
-          acc.today += value;
+        const slotKey = String(item.slot ?? "").slice(0, 10);
+
+        if (slotKey === yesterdayKey || item.day === "yesterday") {
+          acc.yesterdaySum += value;
+          acc.yesterdayCount += 1;
+        } else if (slotKey === todayKey || item.day === "today") {
+          acc.todaySum += value;
+          acc.todayCount += 1;
         }
+
         return acc;
       },
-      { today: 0, yesterday: 0 },
+      { todaySum: 0, todayCount: 0, yesterdaySum: 0, yesterdayCount: 0 },
     );
+
+    return {
+      today: totals.todayCount > 0 ? totals.todaySum / totals.todayCount : 0,
+      yesterday: totals.yesterdayCount > 0 ? totals.yesterdaySum / totals.yesterdayCount : 0,
+    };
   }, [hourly]);
 
   const checkoutChange =
@@ -83,12 +106,37 @@ function App() {
           <h1 className="dashboardTitle">Dashboard de Performance</h1>
           <p className="dashboardSubtitle">Visao consolidada de custo, lucro e ROI</p>
         </div>
-        <div className={`statusPill ${isHealthy ? "isOnline" : "isOffline"}`}>
-          {isLoading
-            ? "Atualizando dados..."
-            : isHealthy
-              ? `Backend online${lastUpdated ? ` - ${new Date(lastUpdated).toLocaleTimeString()}` : ""}`
-              : "Backend indisponivel"}
+        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+          <div className="filterGroup">
+            <label htmlFor="period-select" style={{ marginRight: "8px", fontWeight: 500 }}>
+              Período:
+            </label>
+            <select
+              id="period-select"
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value as "24h" | "daily" | "weekly" | "monthly")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "4px",
+                border: "1px solid #ddd",
+                backgroundColor: "#fff",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              <option value="24h">Últimas 24h</option>
+              <option value="daily">Diário</option>
+              <option value="weekly">Semanal</option>
+              <option value="monthly">Mensal</option>
+            </select>
+          </div>
+          <div className={`statusPill ${isHealthy ? "isOnline" : "isOffline"}`}>
+            {isLoading
+              ? "Atualizando dados..."
+              : isHealthy
+                ? `Backend online${lastUpdated ? ` - ${new Date(lastUpdated).toLocaleTimeString()}` : ""}`
+                : "Backend indisponivel"}
+          </div>
         </div>
       </header>
 
@@ -123,6 +171,7 @@ function App() {
           categoria={formatPercentage(checkoutChange)}
           tendencia={checkoutChange < 0 ? "baixa" : "alta"}
           prefixo=""
+          sufixo="%"
           className="isHighlight"
         />
         <CardRoi
@@ -142,6 +191,7 @@ function App() {
           selectedSquad={selectedSquad}
           squadOptions={SQUAD_OPTIONS}
           onSquadChange={setSelectedSquad}
+          period={selectedPeriod}
         />
       </section>
     </div>
