@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import "/App.css";
+import "./App.css";
 import ValorCard from "./componentes/ValorCard.tsx";
 import CardRoi from "./componentes/CardRoi.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
