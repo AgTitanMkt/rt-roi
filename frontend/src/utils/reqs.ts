@@ -26,6 +26,7 @@ export interface MetricsData {
   profit: number;
   roi: number;
   revenue: number;
+  checkout: number;
 }
 
 export interface SummaryResponse {
@@ -35,6 +36,7 @@ export interface SummaryResponse {
     cost_change: number;
     profit_change: number;
     revenue_change: number;
+    checkout_change: number;
     roi_change: number;
   };
 }

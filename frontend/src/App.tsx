@@ -30,7 +30,6 @@ const getChangePercent = (current: number, previous: number): number => {
   return ((current - previous) / Math.abs(previous)) * 100;
 };
 
-
 function App() {
   const [selectedSquad, setSelectedSquad] = useState<string>(DEFAULT_SQUAD);
   const [selectedPeriod, setSelectedPeriod] = useState<"24h" | "daily" | "weekly" | "monthly">("24h");
@@ -49,6 +48,11 @@ function App() {
   const resolvedRevenueChange =
     comparison?.revenue_change ?? getChangePercent(todayRevenue, yesterdayRevenue);
 
+  const checkoutToday = Number(today?.checkout ?? 0);
+  const checkoutYesterday = Number(yesterday?.checkout ?? 0);
+  const checkoutChange =
+    comparison?.checkout_change ?? getChangePercent(checkoutToday, checkoutYesterday);
+
   const hourlyWithResolvedRevenue = useMemo(
     () =>
       hourly.map((item) => ({
@@ -57,30 +61,6 @@ function App() {
       })),
     [hourly],
   );
-
-  const checkoutTotals = useMemo(() => {
-    const grouped = hourlyWithResolvedRevenue.reduce(
-      (acc, item) => {
-        const value = Number(item.checkout_conversion ?? 0);
-        if (item.day === "yesterday") {
-          acc.yesterdaySum += value;
-          acc.yesterdayCount += 1;
-        } else if (item.day === "today") {
-          acc.todaySum += value;
-          acc.todayCount += 1;
-        }
-        return acc;
-      },
-      { todaySum: 0, todayCount: 0, yesterdaySum: 0, yesterdayCount: 0 },
-    );
-
-    return {
-      today: grouped.todayCount > 0 ? grouped.todaySum / grouped.todayCount : 0,
-      yesterday: grouped.yesterdayCount > 0 ? grouped.yesterdaySum / grouped.yesterdayCount : 0,
-    };
-  }, [hourlyWithResolvedRevenue]);
-
-  const checkoutChange = getChangePercent(checkoutTotals.today, checkoutTotals.yesterday);
 
   const formatMoney = (value: number | undefined): number =>
     Number((value ?? 0).toFixed(2));
@@ -157,8 +137,8 @@ function App() {
         />
         <ValorCard
           nome="Checkout"
-          valor={formatMoney(checkoutTotals.today)}
-          data={formatMoney(checkoutTotals.yesterday)}
+          valor={formatMoney(checkoutToday)}
+          data={formatMoney(checkoutYesterday)}
           categoria={formatPercentage(checkoutChange)}
           tendencia={checkoutChange < 0 ? "baixa" : "alta"}
           prefixo=""
