@@ -10,6 +10,12 @@ import httpx
 
 from dotenv import load_dotenv, find_dotenv
 
+# Retry configuration
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 1  # seconds
+MAX_BACKOFF = 60  # seconds
+RATE_LIMIT_DELAY = 0.5  # 500ms between requests
+
 try:
     from ..core.database import SessionLocal
     from .metrics_service import insert_metrics
@@ -31,6 +37,73 @@ load_dotenv(find_dotenv(usecwd=True))
 REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
 REDTRACK_REPORT_URL = "https://api.redtrack.io/report"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+async def _make_request_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    params: dict,
+    delay_after: float = RATE_LIMIT_DELAY,
+) -> dict:
+    """
+    Make HTTP request with exponential backoff retry for 429 errors.
+    
+    Args:
+        client: AsyncClient instance
+        url: Request URL
+        params: Query parameters
+        delay_after: Delay in seconds after successful request
+    
+    Returns:
+        Response JSON
+    
+    Raises:
+        HTTPStatusError: If all retries exhausted or non-recoverable error
+    """
+    backoff = INITIAL_BACKOFF
+    last_error = None
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            res = await client.get(url, params=params)
+            
+            # If we got rate limited, wait and retry
+            if res.status_code == 429:
+                wait_time = min(backoff, MAX_BACKOFF)
+                print(f"⚠️  Rate limited (429). Attempt {attempt + 1}/{MAX_RETRIES}. Waiting {wait_time}s...")
+                await asyncio.sleep(wait_time)
+                backoff *= 2  # Exponential backoff
+                continue
+            
+            res.raise_for_status()
+            
+            # Add delay after successful request to avoid rate limiting
+            if delay_after > 0:
+                await asyncio.sleep(delay_after)
+            
+            return res.json()
+        
+        except httpx.HTTPStatusError as e:
+            last_error = e
+            if e.response.status_code == 429:
+                # Rate limit: retry with backoff
+                wait_time = min(backoff, MAX_BACKOFF)
+                print(f"⚠️  Rate limited (429). Attempt {attempt + 1}/{MAX_RETRIES}. Waiting {wait_time}s...")
+                await asyncio.sleep(wait_time)
+                backoff *= 2
+            else:
+                # Non-429 errors: fail immediately
+                raise
+        
+        except Exception as e:
+            last_error = e
+            raise
+    
+    # All retries exhausted
+    if last_error:
+        raise RuntimeError(f"Failed after {MAX_RETRIES} retries: {last_error}")
+    raise RuntimeError(f"Failed after {MAX_RETRIES} retries")
+
 
 
 def persist_metrics_report(data: RedtrackResponse) -> None:
@@ -85,9 +158,7 @@ async def _count_campaign_events(
 
     total = 0
     while True:
-        res = await client.get(REDTRACK_REPORT_URL, params=params)
-        res.raise_for_status()
-        page_rows = res.json()
+        page_rows = await _make_request_with_retry(client, REDTRACK_REPORT_URL, params)
 
         if not isinstance(page_rows, list):
             raise RuntimeError("Resposta inesperada da API Redtrack: esperado lista de registros.")
@@ -164,12 +235,11 @@ async def redtrack_reports() -> RedtrackResponse:
         profit_total = 0.0
 
         while True:
-            res = await client.get(
+            page_rows = await _make_request_with_retry(
+                client,
                 REDTRACK_REPORT_URL,
-                params=params,
+                params,
             )
-            res.raise_for_status()
-            page_rows = res.json()
 
             if not isinstance(page_rows, list):
                 raise RuntimeError("Resposta inesperada da API Redtrack: esperado lista de registros.")
