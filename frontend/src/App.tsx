@@ -3,6 +3,7 @@ import "./App.css";
 import ValorCard from "./componentes/ValorCard.tsx";
 import CardRoi from "./componentes/CardRoi.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
+import ConversionTable from "./componentes/ConversionTable.tsx";
 import {
   DEFAULT_SQUAD,
   SQUAD_OPTIONS,
@@ -35,7 +36,7 @@ function App() {
   const [selectedPeriod, setSelectedPeriod] = useState<"24h" | "daily" | "weekly" | "monthly">("24h");
   const backendSquad = selectedSquad === DEFAULT_SQUAD ? undefined : selectedSquad;
 
-  const { summary, hourly, isHealthy, isLoading, error, lastUpdated } =
+  const { summary, hourly, checkouts, products, squads, isHealthy, isLoading, error, lastUpdated } =
     useDashboardData({ squad: backendSquad, period: selectedPeriod });
 
   const today = summary?.today;
@@ -165,6 +166,76 @@ function App() {
           period={selectedPeriod}
         />
       </section>
+
+      <section className="conversionSection">
+        <div className="conversionGrid">
+          <ConversionTable
+            title="🛒 Conversão por Checkout"
+            data={checkouts.map((c) => ({
+              name: c.checkout,
+              initiate_checkout: c.initiate_checkout,
+              purchase: c.purchase,
+              checkout_conversion: c.checkout_conversion,
+            }))}
+            isLoading={isLoading}
+            emptyMessage="Nenhum dado de checkout disponível"
+          />
+          
+          <ConversionTable
+            title="📦 Conversão por Produto"
+            data={products.map((p) => ({
+              name: p.product,
+              initiate_checkout: p.initiate_checkout,
+              purchase: p.purchase,
+              checkout_conversion: p.checkout_conversion,
+            }))}
+            isLoading={isLoading}
+            emptyMessage="Nenhum dado de produto disponível"
+          />
+        </div>
+      </section>
+
+      {squads.length > 0 && (
+        <section className="squadSection">
+          <h2 className="sectionTitle">📊 Performance por Squad</h2>
+          <div className="squadGrid">
+            {squads.map((squad) => (
+              <div key={squad.squad} className="squadCard">
+                <div className="squadHeader">
+                  <span className="squadName">{squad.squad}</span>
+                  <span 
+                    className="squadConversion"
+                    style={{ 
+                      color: squad.checkout_conversion >= 25 ? "#22c55e" : 
+                             squad.checkout_conversion >= 15 ? "#eab308" : "#ef4444" 
+                    }}
+                  >
+                    {squad.checkout_conversion.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="squadMetrics">
+                  <div className="squadMetric">
+                    <span className="squadMetricLabel">Gasto</span>
+                    <span className="squadMetricValue">R$ {squad.cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="squadMetric">
+                    <span className="squadMetricLabel">Lucro</span>
+                    <span className="squadMetricValue" style={{ color: squad.profit >= 0 ? "#22c55e" : "#ef4444" }}>
+                      R$ {squad.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="squadMetric">
+                    <span className="squadMetricLabel">ROI</span>
+                    <span className="squadMetricValue" style={{ color: squad.roi >= 0 ? "#22c55e" : "#ef4444" }}>
+                      {(squad.roi * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
