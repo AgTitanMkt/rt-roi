@@ -14,7 +14,7 @@ class RedtrackReportItem(BaseModel):
     profit: float = Field(..., description="Lucro em moeda")
     revenue: float = Field(..., description="Revenue em moeda")
     roi: float = Field(..., description="ROI (Return on Investment)")
-    conversion: float = Field(..., description="Converssao ")
+    conversion: float = Field(..., description="conversion ")
 
     class Config:
         json_schema_extra = {

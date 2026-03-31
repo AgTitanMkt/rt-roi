@@ -258,6 +258,7 @@ def get_metrics_by_hour(db: Session, source: str = None):
                     ELSE 'yesterday'
                 END as day,
                 EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
+                SUM(checkout_conversion) as checkout_conversion,
                 SUM(cost) as cost,
                 SUM(profit) as profit,
                 SUM(revenue) as revenue,

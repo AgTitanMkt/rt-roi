@@ -29,6 +29,7 @@ class HourlyMetricResponse(BaseModel):
     slot: str = Field(..., examples=["2026-03-28T14:00:00"], description="Timestamp da janela horaria em America/Sao_Paulo")
     day: str = Field(..., examples=["today", "yesterday"], description="Identifica se o ponto pertence a hoje ou ontem")
     hour: str = Field(..., examples=["14"], description="Hora do dia (formato HH, 0-23)")
+    checkout_conversion: float = Field(..., examples=[45.0], description="Total de checkout conversion na hora")
     cost: float = Field(..., examples=[12.1], description="Custo agregado da hora")
     profit: float = Field(..., examples=[4.2], description="Lucro agregado da hora")
     revenue: float = Field(..., examples=[45.0], description="Receita agregada da hora")

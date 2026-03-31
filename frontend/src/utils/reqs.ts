@@ -44,6 +44,7 @@ export interface HourlyMetric {
   slot: string;
   day: "today" | "yesterday" | string;
   hour: string;
+  checkout_conversion: number;
   cost: number;
   profit: number;
   revenue: number;
