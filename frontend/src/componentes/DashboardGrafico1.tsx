@@ -22,7 +22,50 @@ interface DashboardGraficoProps {
   selectedSquad: string;
   squadOptions: SquadOption[];
   onSquadChange: (value: string) => void;
+  period?: "24h" | "daily" | "weekly" | "monthly";
 }
+
+// Agrupa dados por período
+const aggregateByPeriod = (data: HourlyMetric[], period: "24h" | "daily" | "weekly" | "monthly"): HourlyMetric[] => {
+  const grouped: Map<string, HourlyMetric> = new Map();
+
+  data.forEach((item) => {
+    let key: string;
+
+    if (period === "24h" || period === "daily") {
+      // Para 24h e daily, agrupa por data+hora sem ajuste manual de timezone.
+      const day = item.slot ? String(item.slot).slice(0, 10) : "unknown-day";
+      const hour = String(item.hour ?? "0").padStart(2, "0");
+      key = `${day}_${hour}`;
+    } else if (period === "weekly") {
+      // Agrupa por dia da semana
+      const date = item.slot ? new Date(item.slot) : new Date();
+      const day = date.toLocaleDateString("pt-BR", { weekday: "long", month: "2-digit", day: "2-digit" });
+      key = day;
+    } else {
+      // monthly - agrupa por dia
+      const date = item.slot ? new Date(item.slot) : new Date();
+      const day = date.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
+      key = day;
+    }
+
+    if (grouped.has(key)) {
+      const existing = grouped.get(key)!;
+      grouped.set(key, {
+        ...existing,
+        cost: (existing.cost ?? 0) + (item.cost ?? 0),
+        profit: (existing.profit ?? 0) + (item.profit ?? 0),
+        revenue: (existing.revenue ?? 0) + (item.revenue ?? 0),
+        checkout_conversion: (existing.checkout_conversion ?? 0) + (item.checkout_conversion ?? 0),
+        roi: existing.roi !== 0 ? (existing.roi + item.roi) / 2 : item.roi, // ROI média
+      });
+    } else {
+      grouped.set(key, { ...item });
+    }
+  });
+
+  return Array.from(grouped.values());
+};
 
 const DashboardGrafico = ({
   hourlyData,
@@ -30,7 +73,26 @@ const DashboardGrafico = ({
   selectedSquad,
   squadOptions,
   onSquadChange,
+  period = "24h",
 }: DashboardGraficoProps) => {
+  // Agregar dados baseado no período
+  const aggregatedData = useMemo(() => aggregateByPeriod(hourlyData, period), [hourlyData, period]);
+
+  // Função para gerar chave consistente para cada período
+  const getConsistentKey = (item: HourlyMetric, period: "24h" | "daily" | "weekly" | "monthly"): string => {
+    const date = item.slot ? new Date(`${String(item.slot).slice(0, 10)}T12:00:00`) : new Date();
+
+    if (period === "24h" || period === "daily") {
+      const hour = String(date.getHours()).padStart(2, "0");
+      const day = date.toLocaleDateString("pt-BR");
+      return `${day}_${hour}`;
+    } else if (period === "weekly") {
+      return date.toLocaleDateString("pt-BR", { weekday: "long", month: "2-digit", day: "2-digit" });
+    } else {
+      return date.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
+    }
+  };
+
   const dadosUnificados = useMemo(
     () => {
       const shiftHourForward = (hourValue: string | number | null | undefined): number => {
@@ -40,7 +102,7 @@ const DashboardGrafico = ({
           return 0;
         }
 
-        return (parsedHour + 1 + 24) % 24;
+        return (parsedHour + 24) % 24;
       };
 
       const getOrderValue = (item: HourlyMetric): number => {
@@ -56,6 +118,14 @@ const DashboardGrafico = ({
       };
 
       const getAxisLabel = (item: HourlyMetric): string => {
+        if (period !== "24h" && period !== "daily" && item.slot) {
+          const date = new Date(item.slot);
+          if (period === "weekly") {
+            return date.toLocaleDateString("pt-BR", { weekday: "short", month: "2-digit", day: "2-digit" });
+          } else {
+            return date.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
+          }
+        }
         const hourLabel = String(shiftHourForward(item.hour)).padStart(2, "0");
         return `${hourLabel}:00`;
       };
@@ -70,23 +140,29 @@ const DashboardGrafico = ({
           return item.slot;
         }
 
-        parsed.setHours(parsed.getHours() + 1);
-
-        return parsed.toLocaleString("pt-BR", {
-          day: "2-digit",
-          month: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        if (period === "24h" || period === "daily") {
+          return parsed.toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        } else {
+          return parsed.toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+          });
+        }
       };
 
-      return [...hourlyData]
+      return [...aggregatedData]
         .sort((a, b) => getOrderValue(a) - getOrderValue(b))
         .slice(0, MAX_CHART_POINTS)
-        .map((item, index) => {
+        .map((item) => {
           const relacao = Number(item.roi ?? 0);
-          const shiftedHour = String(shiftHourForward(item.hour)).padStart(2, "0");
-          const xKey = item.slot || `${shiftedHour}-${index}`;
+          // Usar a chave consistente para xKey também
+          const xKey = getConsistentKey(item, period);
 
           return {
             xKey,
@@ -99,7 +175,7 @@ const DashboardGrafico = ({
           };
         });
     },
-    [hourlyData],
+    [aggregatedData, period],
   );
 
   const relacaoValores = dadosUnificados.map((d) => d.relacao);
@@ -152,7 +228,12 @@ const DashboardGrafico = ({
           <h2 style={{ fontSize: "clamp(14px, 2.8vw, 16px)", margin: 0 }}>
             Performance Analitica
           </h2>
-          <small style={{ color: "#9ca3af" }}>Ultimas 24 horas</small>
+          <small style={{ color: "#9ca3af" }}>
+            {period === "24h" && "Últimas 24 horas"}
+            {period === "daily" && "Hoje"}
+            {period === "weekly" && "Esta semana"}
+            {period === "monthly" && "Este mês"}
+          </small>
         </div>
         <div
           style={{
@@ -192,22 +273,26 @@ const DashboardGrafico = ({
       </div>
 
       <div style={{ width: "100%", height: "clamp(240px, 52vw, 360px)" }}>
-        <p
-          style={{
-            fontSize: "12px",
-            color: "#2563eb",
-            marginBottom: "5px",
-            fontWeight: "bold",
-          }}
-        >
-          Gasto, Faturamento e ROI Por Hora.
-        </p>
         {dadosUnificados.length === 0 ? (
           <p style={{ fontSize: "12px", color: "#9ca3af" }}>
             Sem dados para exibir no grafico.
           </p>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <>
+            <p
+              style={{
+                fontSize: "12px",
+                color: "#2563eb",
+                marginBottom: "5px",
+                fontWeight: "bold",
+              }}
+            >
+              {period === "24h" && "Gasto, Faturamento e ROI Por Hora"}
+              {period === "daily" && "Gasto, Faturamento e ROI Por Hora do Dia"}
+              {period === "weekly" && "Gasto, Faturamento e ROI Por Dia da Semana"}
+              {period === "monthly" && "Gasto, Faturamento e ROI Por Dia do Mês"}
+            </p>
+            <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={dadosUnificados}
               barCategoryGap="35%"
@@ -250,7 +335,7 @@ const DashboardGrafico = ({
                     : Number(value ?? 0);
 
                   if (key === "relacao") {
-                    return [`${numericValue.toFixed(2)}x`, "ROI"];
+                    return [`${(numericValue * 100).toFixed(2)}%`, "ROI"];
                   }
 
                   if (key === "gasto") {
@@ -258,7 +343,7 @@ const DashboardGrafico = ({
                   }
 
                   if (key === "checkout") {
-                    return [numericValue.toFixed(2), "Checkout Conversion"];
+                    return [`${numericValue.toFixed(2)}%`, "Checkout Conversion"];
                   }
 
                   return [`$${numericValue.toFixed(2)}`, "Faturamento"];
@@ -329,6 +414,7 @@ const DashboardGrafico = ({
               <RechartsDevtools />
             </ComposedChart>
           </ResponsiveContainer>
+          </>
         )}
       </div>
     </div>

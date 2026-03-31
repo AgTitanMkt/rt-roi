@@ -258,7 +258,7 @@ def get_metrics_by_hour(db: Session, source: str = None):
                     ELSE 'yesterday'
                 END as day,
                 EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
-                SUM(checkout_conversion) as checkout_conversion,
+                ROUND(AVG(checkout_conversion), 2) as checkout_conversion,
                 SUM(cost) as cost,
                 SUM(profit) as profit,
                 SUM(revenue) as revenue,
@@ -289,3 +289,86 @@ def get_metrics_by_hour(db: Session, source: str = None):
 
     result = db.execute(text(query), params)
     return result.fetchall()
+
+
+def get_metrics_by_period(db: Session, period: str = "24h", source: str = None):
+    """
+    Retorna métricas para um período específico.
+    
+    period: "24h", "daily", "weekly", ou "monthly"
+    
+    - 24h: últimas 24 horas (últimas 24 horas do dia atual + anterior)
+    - daily: hoje inteiro (00:00 até agora)
+    - weekly: últimos 7 dias
+    - monthly: últimos 30 dias
+    """
+    now_sp = datetime.now(SAO_PAULO_TZ)
+    sp_today = now_sp.date()
+    
+    # Determinar intervalo de datas conforme o período
+    if period == "24h":
+        date_start = sp_today - timedelta(days=1)
+        date_end = sp_today
+        limit_hours = 24
+    elif period == "daily":
+        date_start = sp_today
+        date_end = sp_today
+        limit_hours = 24
+    elif period == "weekly":
+        date_start = sp_today - timedelta(days=7)
+        date_end = sp_today
+        limit_hours = None  # Sem limite
+    elif period == "monthly":
+        date_start = sp_today - timedelta(days=30)
+        date_end = sp_today
+        limit_hours = None  # Sem limite
+    else:
+        date_start = sp_today - timedelta(days=1)
+        date_end = sp_today
+        limit_hours = 24
+    
+    sp_yesterday = sp_today - timedelta(days=1)
+
+    # Construir query dinâmica
+    limit_clause = f"LIMIT {limit_hours}" if limit_hours else ""
+    
+    query = f"""
+        SELECT
+            to_char(date_trunc('hour', timezone('America/Sao_Paulo', metric_at)), 'YYYY-MM-DD"T"HH24:00:00') as slot,
+            EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
+            CASE
+                WHEN timezone('America/Sao_Paulo', metric_at)::date = :sp_today THEN 'today'
+                WHEN timezone('America/Sao_Paulo', metric_at)::date = :sp_yesterday THEN 'yesterday'
+                ELSE 'past'
+            END as day,
+            ROUND(AVG(checkout_conversion), 2) as checkout_conversion,
+            SUM(cost) as cost,
+            SUM(profit) as profit,
+            SUM(revenue) as revenue,
+            ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi,
+            CASE WHEN :source IS NULL THEN NULL::text ELSE :source END as squad
+        FROM tb_hourly_metrics
+        WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :date_start AND :date_end
+          AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+        GROUP BY
+            date_trunc('hour', timezone('America/Sao_Paulo', metric_at)),
+            EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at)),
+            timezone('America/Sao_Paulo', metric_at)::date
+        ORDER BY slot DESC
+        {limit_clause}
+    """
+    
+    params: dict[str, object] = {
+        "sp_today": sp_today,
+        "sp_yesterday": sp_yesterday,
+        "date_start": date_start,
+        "date_end": date_end,
+        "source": source,
+    }
+    
+    result = db.execute(text(query), params)
+    rows = result.fetchall()
+    
+    # Reverter ordem para crescente (mais antigo primeiro)
+    return list(reversed(rows)) if rows else []
+

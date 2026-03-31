@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from ..core.database import SessionLocal
 from ..schemas.metrics_schema import HourlyMetricResponse, SummaryResponse
 from ..services.redis_service import get_summary_cached, get_hourly_cached
+from ..services.metrics_service import get_metrics_by_period
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -135,6 +136,54 @@ def get_hourly(
     rows = get_hourly_cached(db, source)
     print(rows)
 
+    return [
+        {
+            "slot": str(_get_value(row, "slot", "")),
+            "day": str(_get_value(row, "day", "")),
+            "hour": str(_get_value(row, "hour", "")),
+            "checkout_conversion": float(_get_value(row, "checkout_conversion", 0) or 0),
+            "cost": float(_get_value(row, "cost", 0) or 0),
+            "profit": float(_get_value(row, "profit", 0) or 0),
+            "revenue": float(_get_value(row, "revenue", 0) or 0),
+            "roi": float(_get_value(row, "roi", 0) or 0),
+        }
+        for row in rows
+    ]
+
+@router.get(
+    "/hourly/period",
+    summary="Retorna métricas por período",
+    description=(
+        "Retorna uma série temporal por hora para diferentes períodos.\n\n"
+        "- `period`: 24h, daily, weekly, ou monthly\n"
+        "- `source` (opcional): filtra por origem de tráfego."
+    ),
+    response_model=list[HourlyMetricResponse],
+    response_description="Série temporal por período para gráficos",
+)
+def get_hourly_period(
+    period: str = Query(
+        default="24h",
+        description="Período: 24h, daily, weekly, ou monthly",
+        examples=["24h", "daily", "weekly", "monthly"],
+    ),
+    source: str | None = Query(
+        default=None,
+        description="Origem de tráfego para filtrar os dados",
+        examples=["FBR"],
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna métricas agregadas por hora para um período específico.
+    
+    - 24h: últimas 24 horas
+    - daily: hoje inteiro
+    - weekly: últimos 7 dias
+    - monthly: últimos 30 dias
+    """
+    rows = get_metrics_by_period(db, period, source)
+    
     return [
         {
             "slot": str(_get_value(row, "slot", "")),

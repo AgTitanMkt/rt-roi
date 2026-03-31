@@ -10,6 +10,7 @@ interface valueCardProps{
 
 function CardRoi({ nome, valor, data, categoria, tendencia }: valueCardProps) {
   const isDown = tendencia === "baixa";
+  const roiToPercent = (input: number) => (input * 100).toFixed(2);
 
   return (
     <div className="CardInfo">
@@ -19,10 +20,10 @@ function CardRoi({ nome, valor, data, categoria, tendencia }: valueCardProps) {
           {isDown ? "▼" : "▲"} {categoria}%
         </span>
       </div>
-      <div className="valorInfo">{valor.toFixed(2)}x</div>
+      <div className="valorInfo">{roiToPercent(valor)}%</div>
       <div className="dataInfo">
         <span className="dataLabel">Ontem</span>
-        <span className="dataValue">{data.toFixed(2)}x</span>
+        <span className="dataValue">{roiToPercent(data)}%</span>
       </div>
     </div>
   );

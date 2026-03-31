@@ -57,6 +57,7 @@ interface HealthResponse {
 
 interface UseDashboardDataParams {
   squad?: string;
+  period?: "24h" | "daily" | "weekly" | "monthly";
   refreshMs?: number;
 }
 
@@ -75,7 +76,8 @@ const withSquad = (path: string, squad?: string): string => {
 
   // Compatibilidade com backend atual (query param ainda chamado source).
   const params = new URLSearchParams({ source: squad });
-  return `${path}?${params.toString()}`;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}${params.toString()}`;
 };
 
 const fetchJson = async <T>(path: string): Promise<T> => {
@@ -103,8 +105,10 @@ const fetchJson = async <T>(path: string): Promise<T> => {
 export const fetchSummary = (squad?: string): Promise<SummaryResponse> =>
   fetchJson<SummaryResponse>(withSquad("/metrics/summary", squad));
 
-export const fetchHourly = (squad?: string): Promise<HourlyMetric[]> =>
-  fetchJson<HourlyMetric[]>(withSquad("/metrics/hourly", squad));
+export const fetchHourly = (squad?: string, period: string = "24h"): Promise<HourlyMetric[]> => {
+  const path = `/metrics/hourly/period?period=${period}`;
+  return fetchJson<HourlyMetric[]>(withSquad(path, squad));
+};
 
 export const checkBackendHealth = async (): Promise<boolean> => {
   const health = await fetchJson<HealthResponse>("/health");
@@ -113,6 +117,7 @@ export const checkBackendHealth = async (): Promise<boolean> => {
 
 export const useDashboardData = ({
   squad,
+  period = "24h",
   refreshMs = 60_000,
 }: UseDashboardDataParams = {}): UseDashboardDataResult => {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
@@ -124,12 +129,13 @@ export const useDashboardData = ({
 
   const loadDashboardData = useCallback(async () => {
     setError(null);
+    setIsLoading(true);
 
     try {
       const [healthy, summaryData, hourlyData] = await Promise.all([
         checkBackendHealth(),
         fetchSummary(squad),
-        fetchHourly(squad),
+        fetchHourly(squad, period),
       ]);
 
       setIsHealthy(healthy);
@@ -143,7 +149,7 @@ export const useDashboardData = ({
     } finally {
       setIsLoading(false);
     }
-  }, [squad]);
+  }, [squad, period]);
 
   useEffect(() => {
     void loadDashboardData();
@@ -153,7 +159,7 @@ export const useDashboardData = ({
     }, refreshMs);
 
     return () => window.clearInterval(intervalId);
-  }, [loadDashboardData, refreshMs]);
+  }, [loadDashboardData, refreshMs, period]);
 
   return {
     summary,
