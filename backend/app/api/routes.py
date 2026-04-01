@@ -18,6 +18,7 @@ from ..services.metrics_service import (
     get_squad_checkout_summary,
     get_conversion_breakdown,
 )
+from ..services.filter_service import FilterService, ResponseBuilder
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -69,18 +70,20 @@ def get_summary(
         ),
         source: str | None = Query(
             default=None,
-            description="Origem de tráfego para filtrar os dados (ex.: mediago)",
-            examples=["mediago"],
+            description="Squad/Origem de tráfego para filtrar os dados (ex.: yts, ytf)",
+            examples=["yts", "ytf"],
         ),
         db: Session = Depends(get_db)
 ):
-    result = get_summary_cached(db, source, period)
+    # Normalizar filtros usando FilterService
+    filters = FilterService.build_filters(period=period, source=source)
+
+    result = get_summary_cached(db, filters.source, filters.period)
 
     if not isinstance(result, dict) or "today" not in result:
         result = _empty_summary_payload()
 
-    print(f"RETORNANDO PARA O FRONT: {result}")
-    return {
+    summary_data = {
         "today": {
             "cost": float((result.get("today") or {}).get("cost") or 0),
             "profit": float((result.get("today") or {}).get("profit") or 0),
@@ -103,6 +106,9 @@ def get_summary(
             "roi_change": float((result.get("comparison") or {}).get("roi_change") or 0),
         }
     }
+
+    # Retornar com meta de filtros aplicados
+    return ResponseBuilder.build_single_response(summary_data, filters)
 
 @router.get(
     "/hourly",
@@ -149,15 +155,15 @@ def get_summary(
 def get_hourly(
     source: str | None = Query(
         default=None,
-        description="Origem de tráfego para filtrar os dados (ex.: YTD)",
-        examples=["YTD"],
+        description="Squad/Origem de tráfego para filtrar os dados (ex.: yts, ytf)",
+        examples=["yts", "ytf"],
     ),
     db: Session = Depends(get_db)
 ):
-    rows = get_hourly_cached(db, source)
-    print(rows)
+    filters = FilterService.build_filters(source=source)
+    rows = get_hourly_cached(db, filters.source)
 
-    return [
+    data = [
         {
             "squad": str(_get_value(row, "squad", "")),
             "slot": str(_get_value(row, "slot", "")),
@@ -171,6 +177,8 @@ def get_hourly(
         }
         for row in rows
     ]
+
+    return ResponseBuilder.build_list_response(data, filters)
 
 @router.get(
     "/hourly/period",
@@ -191,8 +199,8 @@ def get_hourly_period(
     ),
     source: str | None = Query(
         default=None,
-        description="Origem de tráfego para filtrar os dados",
-        examples=["FBR"],
+        description="Squad/Origem de tráfego para filtrar os dados",
+        examples=["yts", "ytf"],
     ),
     db: Session = Depends(get_db)
 ):
@@ -204,9 +212,10 @@ def get_hourly_period(
     - weekly: últimos 7 dias
     - monthly: últimos 30 dias
     """
-    rows = get_metrics_by_period(db, period, source)
-    
-    return [
+    filters = FilterService.build_filters(period=period, source=source)
+    rows = get_metrics_by_period(db, filters.period, filters.source)
+
+    data = [
         {
             "squad": str(_get_value(row, "squad", "")),
             "slot": str(_get_value(row, "slot", "")),
@@ -220,6 +229,8 @@ def get_hourly_period(
         }
         for row in rows
     ]
+
+    return ResponseBuilder.build_list_response(data, filters)
 
 
 @router.get(
@@ -263,15 +274,17 @@ def get_by_checkout(
     ),
     source: str | None = Query(
         default=None,
-        description="Squad para filtrar os dados (ex.: FBR)",
-        examples=["FBR", "YTD"],
+        description="Squad para filtrar os dados (ex.: yts, ytf)",
+        examples=["yts", "ytf"],
     ),
     db: Session = Depends(get_db)
 ):
     """
     Retorna conversão por checkout (Cartpanda vs Clickbank).
     """
-    return get_checkout_summary(db, source, period)
+    filters = FilterService.build_filters(period=period, source=source)
+    data = get_checkout_summary(db, filters.source, filters.period)
+    return ResponseBuilder.build_list_response(data, filters)
 
 
 @router.get(
@@ -315,15 +328,17 @@ def get_by_product(
     ),
     source: str | None = Query(
         default=None,
-        description="Squad para filtrar os dados (ex.: FBR)",
-        examples=["FBR", "YTD"],
+        description="Squad para filtrar os dados (ex.: yts, ytf)",
+        examples=["yts", "ytf"],
     ),
     db: Session = Depends(get_db)
 ):
     """
     Retorna conversão por produto.
     """
-    return get_product_summary(db, source, period)
+    filters = FilterService.build_filters(period=period, source=source)
+    data = get_product_summary(db, filters.source, filters.period)
+    return ResponseBuilder.build_list_response(data, filters)
 
 
 @router.get(
@@ -365,7 +380,9 @@ def get_by_squad(
     """
     Retorna métricas agregadas por squad.
     """
-    return get_squad_checkout_summary(db, period)
+    filters = FilterService.build_filters(period=period)
+    data = get_squad_checkout_summary(db, filters.period)
+    return ResponseBuilder.build_list_response(data, filters)
 
 
 @router.get(
@@ -386,16 +403,23 @@ def get_conversion_breakdown_route(
         description="Período: 24h, daily, weekly, monthly",
         examples=["24h", "daily", "weekly", "monthly"],
     ),
-    squad: str | None = Query(default=None, description="Filtro opcional de squad"),
-    checkout: str | None = Query(default=None, description="Filtro opcional de checkout"),
+    squad: str | None = Query(default=None, description="Filtro opcional de squad (ex.: yts, ytf)"),
+    checkout: str | None = Query(default=None, description="Filtro opcional de checkout (ex.: Cartpanda, Clickbank)"),
     product: str | None = Query(default=None, description="Filtro opcional de produto"),
     db: Session = Depends(get_db),
 ):
-    return get_conversion_breakdown(
-        db,
+    filters = FilterService.build_filters(
         period=period,
         squad=squad,
         checkout=checkout,
         product=product,
     )
+    data = get_conversion_breakdown(
+        db,
+        period=filters.period,
+        squad=filters.squad,
+        checkout=filters.checkout,
+        product=filters.product,
+    )
+    return ResponseBuilder.build_list_response(data, filters)
 

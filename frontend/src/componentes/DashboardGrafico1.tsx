@@ -11,7 +11,7 @@ import {
   Legend,
   ReferenceLine,
 } from "recharts";
-import type { HourlyMetric, SquadOption } from "../utils/reqs.ts";
+import type { HourlyMetric } from "../utils/reqs.ts";
 
 const MAX_CHART_POINTS = 24;
 
@@ -19,8 +19,6 @@ interface DashboardGraficoProps {
   hourlyData: HourlyMetric[];
   isLoading?: boolean;
   selectedSquad: string;
-  squadOptions: SquadOption[];
-  onSquadChange: (value: string) => void;
   period?: "24h" | "daily" | "weekly" | "monthly";
 }
 
@@ -69,9 +67,6 @@ const aggregateByPeriod = (data: HourlyMetric[], period: "24h" | "daily" | "week
 const DashboardGrafico = ({
   hourlyData,
   isLoading = false,
-  selectedSquad,
-  squadOptions,
-  onSquadChange,
   period = "24h",
 }: DashboardGraficoProps) => {
   // Agregar dados baseado no período
@@ -233,17 +228,6 @@ const DashboardGrafico = ({
           <small className="chartMeta">
             {isLoading ? "Atualizando..." : `${dadosUnificados.length} pontos`}
           </small>
-          <select
-            value={selectedSquad}
-            onChange={(event) => onSquadChange(event.target.value)}
-            className="ui-select"
-          >
-            {squadOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 

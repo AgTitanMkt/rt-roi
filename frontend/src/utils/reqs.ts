@@ -172,8 +172,15 @@ export const fetchSquadMetrics = (period: string = "24h"): Promise<SquadMetric[]
 
 export const fetchConversionBreakdown = (
   period: string = "24h",
+  squad?: string,
+  checkout?: string,
+  product?: string,
 ): Promise<ConversionBreakdownMetric[]> => {
-  return fetchJson<ConversionBreakdownMetric[]>(`/metrics/conversion-breakdown?period=${period}`);
+  let path = `/metrics/conversion-breakdown?period=${period}`;
+  if (squad) path += `&squad=${squad}`;
+  if (checkout) path += `&checkout=${checkout}`;
+  if (product) path += `&product=${product}`;
+  return fetchJson<ConversionBreakdownMetric[]>(path);
 };
 
 export const checkBackendHealth = async (): Promise<boolean> => {

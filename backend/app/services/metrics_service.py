@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from ..models.metrics import DailySummary, HourlyMetric
+from .redtrack.mappings import resolve_product
 
 
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
@@ -586,15 +587,42 @@ def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
     result = db.execute(text(query), params)
     rows = result.fetchall()
     
-    return [
-        {
-            "product": row.product,
-            "initiate_checkout": int(row.initiate_checkout or 0),
-            "purchase": int(row.purchase or 0),
-            "checkout_conversion": float(row.checkout_conversion or 0),
-        }
-        for row in rows
-    ]
+    # Consolida aliases no mesmo produto canônico para resposta consistente.
+    grouped: dict[str, dict[str, int | float]] = {}
+    for row in rows:
+        product = resolve_product(str(row.product or "unknown"))
+        if product == "unknown":
+            continue
+
+        agg = grouped.setdefault(
+            product,
+            {
+                "initiate_checkout": 0,
+                "purchase": 0,
+            },
+        )
+        agg["initiate_checkout"] = int(agg["initiate_checkout"] or 0) + int(row.initiate_checkout or 0)
+        agg["purchase"] = int(agg["purchase"] or 0) + int(row.purchase or 0)
+
+    normalized_rows: list[dict[str, object]] = []
+    for product, agg in grouped.items():
+        initiate = int(agg["initiate_checkout"] or 0)
+        purchase = int(agg["purchase"] or 0)
+        conversion = round((purchase / initiate) * 100, 2) if initiate > 0 else 0.0
+        normalized_rows.append(
+            {
+                "product": product,
+                "initiate_checkout": initiate,
+                "purchase": purchase,
+                "checkout_conversion": conversion,
+            }
+        )
+
+    normalized_rows.sort(
+        key=lambda item: (float(item["checkout_conversion"]), int(item["purchase"]), int(item["initiate_checkout"])),
+        reverse=True,
+    )
+    return normalized_rows
 
 
 def get_squad_checkout_summary(db: Session, period: str = "24h"):
@@ -739,16 +767,23 @@ def get_conversion_breakdown(
         },
     ).fetchall()
 
-    return [
-        {
-            "squad": str(row.squad or "unknown"),
-            "checkout": str(row.checkout or "unknown"),
-            "product": str(row.product or "unknown"),
-            "initiate_checkout": int(row.initiate_checkout or 0),
-            "purchase": int(row.purchase or 0),
-            "checkout_conversion": float(row.checkout_conversion or 0),
-        }
-        for row in rows
-    ]
+    normalized: list[dict[str, object]] = []
+    for row in rows:
+        product_value = resolve_product(str(row.product or "unknown"))
+        if product and product_value != product:
+            continue
+
+        normalized.append(
+            {
+                "squad": str(row.squad or "unknown"),
+                "checkout": str(row.checkout or "unknown"),
+                "product": product_value,
+                "initiate_checkout": int(row.initiate_checkout or 0),
+                "purchase": int(row.purchase or 0),
+                "checkout_conversion": float(row.checkout_conversion or 0),
+            }
+        )
+
+    return normalized
 
 

@@ -97,7 +97,8 @@ async def redtrack_reports() -> RedtrackResponse:
 
                 offer_name = str(row.get("offer") or row.get("offer_name") or "").strip()
                 campaign_name = str(row.get("campaign") or "").strip()
-                source_name = campaign_name or offer_name
+                source_candidates = [value for value in (campaign_name, offer_name) if value]
+                source_name = " | ".join(source_candidates)
 
                 offer_id = str(row.get("offer_id") or row.get("offerId") or "").strip()
                 campaign_id = str(row.get("campaign_id") or row.get("campaignId") or "").strip()

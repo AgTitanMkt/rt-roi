@@ -8,7 +8,7 @@ import httpx
 from ...core.database import SessionLocal
 from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSummary, DailyConversionEntity
 from ..metrics_service import get_summary as get_summary_metrics
-from .conversions import AggregatedConversions
+from .conversions import AggregatedConversions, extract_campaign_info
 from .http_client import make_request_with_retry
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL
 
@@ -28,9 +28,7 @@ def _q0(value: int | float | Decimal) -> Decimal:
 
 
 def _extract_squad_from_campaign_name(campaign_name: str) -> str:
-    parts = [part.strip() for part in str(campaign_name or "").split("|") if part.strip()]
-    responsible = parts[1] if len(parts) > 1 else (parts[0] if parts else "unknown")
-    return (responsible.split("-")[0] or "unknown").strip() or "unknown"
+    return extract_campaign_info(campaign_name).squad
 
 
 async def fetch_daily_summary_rows(
@@ -85,7 +83,8 @@ def persist_daily_summary_snapshot(
     for row in rows:
         campaign_name = str(row.get("campaign") or row.get("campaign_name") or "")
         offer_name = str(row.get("offer") or row.get("offer_name") or "")
-        source_name = campaign_name or offer_name
+        source_candidates = [value.strip() for value in (campaign_name, offer_name) if str(value or "").strip()]
+        source_name = " | ".join(source_candidates)
         squad = _extract_squad_from_campaign_name(source_name)
         
         if squad not in by_squad:

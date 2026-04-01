@@ -1,53 +1,31 @@
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
 
 import httpx
 
 from .http_client import make_request_with_retry
-from .settings import REDTRACK_API_KEY, REDTRACK_CONVERSIONS_URL, REDTRACK_REPORT_URL
+from .extractors import (
+    get_campaign_id,
+    get_campaign_name,
+    get_offer_id,
+    get_offer_name,
+    get_conversion_type,
+    get_event_count,
+    build_mapping_source_text,
+)
+from .mappings import resolve_squad, resolve_checkout, resolve_product
+from .aggregators import aggregate_by_dimension
+from .models import CampaignInfo, AggregatedConversions
+from .settings import (
+    REDTRACK_API_KEY,
+    REDTRACK_CONVERSIONS_URL,
+    REDTRACK_REPORT_URL,
+)
 
 logger = logging.getLogger(__name__)
 
 # Tipos de conversão que queremos filtrar
 VALID_CONVERSION_TYPES = {"purchase", "initiatecheckout"}
 
-
-@dataclass
-class CampaignInfo:
-    """Informações extraídas da nomenclatura da campanha."""
-    campaign_id: str
-    campaign_name: str
-    offer_id: str | None = None
-    squad: str = "unknown"
-    checkout: str = "unknown"  # Cartpanda, Clickbank, etc.
-    product: str = "unknown"   # ErosLift, etc.
-    niche: str = "unknown"     # ED, etc.
-    platform: str = "unknown"  # FB, etc.
-
-
-@dataclass 
-class ConversionMetrics:
-    """Métricas de conversão agregadas."""
-    initiate_checkout: int = 0
-    purchase: int = 0
-    
-    @property
-    def conversion_rate(self) -> float:
-        if self.initiate_checkout == 0:
-            return 0.0
-        return (self.purchase / self.initiate_checkout) * 100
-
-
-@dataclass
-class AggregatedConversions:
-    """Conversões agregadas por diferentes dimensões."""
-    by_campaign: dict[str, ConversionMetrics] = field(default_factory=dict)
-    campaign_info: dict[str, CampaignInfo] = field(default_factory=dict)
-    by_squad: dict[str, ConversionMetrics] = field(default_factory=dict)
-    by_checkout: dict[str, ConversionMetrics] = field(default_factory=dict)
-    by_product: dict[str, ConversionMetrics] = field(default_factory=dict)
-    total: ConversionMetrics = field(default_factory=ConversionMetrics)
 
 
 def extract_campaign_info(campaign_name: str, campaign_id: str = "", offer_id: str | None = None) -> CampaignInfo:
@@ -75,138 +53,18 @@ def extract_campaign_info(campaign_name: str, campaign_id: str = "", offer_id: s
     if len(parts) > 0:
         info.platform = parts[0].upper()
     
-    if len(parts) > 1:
-        responsible = parts[1]
-        info.squad = (responsible.split("-")[0] or "unknown").strip().upper()
-    
-    if len(parts) > 2:
-        checkout = parts[2].strip().lower()
-        # Normalizar nomes de checkout
-        if "cartpanda" in checkout:
-            info.checkout = "Cartpanda"
-        elif "clickbank" in checkout:
-            info.checkout = "Clickbank"
-        else:
-            info.checkout = parts[2].strip()
-    
+    # Squad/checkout são resolvidos no texto completo para não depender da ordem dos campos.
+    info.squad = resolve_squad(campaign_name)
+    info.checkout = resolve_checkout(campaign_name)
+
     if len(parts) > 3:
         info.niche = parts[3].strip().upper()
     
-    if len(parts) > 4:
-        info.product = parts[4].strip()
-    
+    # Produto também é resolvido no texto completo para padronizar aliases.
+    info.product = resolve_product(campaign_name)
+
     return info
 
-
-def _get_campaign_id(row: dict) -> str:
-    """Extrai o identificador principal (campaign_id com fallback para offer_id)."""
-    campaign = row.get("campaign")
-    if isinstance(campaign, dict):
-        nested_id = str(campaign.get("id") or campaign.get("campaign_id") or "").strip()
-        if nested_id:
-            return nested_id
-
-    campaign_id = str(row.get("campaign_id") or row.get("campaignId") or "").strip()
-    if campaign_id:
-        return campaign_id
-
-    offer = row.get("offer")
-    if isinstance(offer, dict):
-        nested_offer_id = str(offer.get("id") or offer.get("offer_id") or "").strip()
-        if nested_offer_id:
-            return nested_offer_id
-
-    return str(
-        row.get("offer_id")
-        or row.get("offerId")
-        or row.get("cid")
-        or row.get("oid")
-        or row.get("id")
-        or row.get("offer")
-        or row.get("campaign")
-        or ""
-    ).strip()
-
-
-def _get_campaign_name(row: dict) -> str:
-    """Extrai nome principal (campaign com fallback para offer)."""
-    campaign = row.get("campaign")
-    if isinstance(campaign, dict):
-        nested_name = str(campaign.get("name") or campaign.get("campaign_name") or "").strip()
-        if nested_name:
-            return nested_name
-
-    campaign_name = str(row.get("campaign_name") or row.get("campaign") or "").strip()
-    if campaign_name:
-        return campaign_name
-
-    offer = row.get("offer")
-    if isinstance(offer, dict):
-        nested_offer_name = str(offer.get("name") or offer.get("offer_name") or "").strip()
-        if nested_offer_name:
-            return nested_offer_name
-
-    return str(row.get("offer_name") or row.get("offer") or "").strip()
-
-
-def _get_offer_id(row: dict) -> str | None:
-    offer = row.get("offer")
-    if isinstance(offer, dict):
-        nested_offer_id = str(offer.get("id") or offer.get("offer_id") or "").strip()
-        if nested_offer_id:
-            return nested_offer_id
-
-    offer_id = str(row.get("offer_id") or row.get("offerId") or row.get("oid") or "").strip()
-    return offer_id or None
-
-
-def _get_conversion_type(row: dict) -> Optional[str]:
-    """
-    Extrai e normaliza o tipo de conversão.
-    Retorna None se não for um tipo válido (Purchase ou InitiateCheckout).
-    """
-    raw_type = str(
-        row.get("type")
-        or row.get("event_type")
-        or row.get("conversion_type")
-        or row.get("conversionType")
-        or row.get("goal")
-        or row.get("event")
-        or ""
-    ).strip().lower()
-
-    if raw_type in VALID_CONVERSION_TYPES:
-        return raw_type
-    
-    # Tentar normalizar variações comuns
-    if "purchase" in raw_type:
-        return "purchase"
-    if "initiate" in raw_type and "checkout" in raw_type:
-        return "initiatecheckout"
-    
-    return None
-
-
-def _get_event_count(row: dict) -> int:
-    """Extrai a quantidade de eventos de uma linha."""
-    for key in (
-        "count",
-        "event_count",
-        "events",
-        "conversions",
-        "total",
-        "value",
-        "qty",
-        "amount",
-    ):
-        raw = row.get(key)
-        if raw is None:
-            continue
-        try:
-            return max(int(float(raw)), 0)
-        except (TypeError, ValueError):
-            continue
-    return 1
 
 
 def _extract_rows(payload: object) -> list[dict]:
@@ -306,44 +164,36 @@ async def _fallback_fetch_all_conversions_via_report(
     campaign_info_cache: dict[str, CampaignInfo] = {}
 
     for event_type, is_purchase in (("InitiateCheckout", False), ("Purchase", True)):
-        rows = await _fetch_report_event_rows(
-            client,
-            event_type=event_type,
-            date_from=date_from,
-            date_to=date_to,
-        )
+         rows = await _fetch_report_event_rows(
+             client,
+             event_type=event_type,
+             date_from=date_from,
+             date_to=date_to,
+         )
 
-        for row in rows:
-            campaign_id = _get_campaign_id(row)
-            if not campaign_id:
-                continue
+         for row in rows:
+             campaign_id = get_campaign_id(row)
+             if not campaign_id:
+                 continue
 
-            campaign_name = _get_campaign_name(row)
-            offer_id = _get_offer_id(row)
-            count = _get_event_count(row)
+             campaign_name = get_campaign_name(row)
+             offer_name = get_offer_name(row)
+             mapping_source = build_mapping_source_text(campaign_name, offer_name)
+             offer_id = get_offer_id(row)
+             count = get_event_count(row)
 
-            if campaign_id not in campaign_info_cache:
-                campaign_info_cache[campaign_id] = extract_campaign_info(campaign_name, campaign_id, offer_id)
+             if campaign_id not in campaign_info_cache:
+                 campaign_info_cache[campaign_id] = extract_campaign_info(
+                     mapping_source or campaign_name, campaign_id, offer_id,
+                 )
 
-            info = campaign_info_cache[campaign_id]
-            result.campaign_info[campaign_id] = info
-            result.by_campaign.setdefault(campaign_id, ConversionMetrics())
-            result.by_squad.setdefault(info.squad, ConversionMetrics())
-            result.by_checkout.setdefault(info.checkout, ConversionMetrics())
-            result.by_product.setdefault(info.product, ConversionMetrics())
+             info = campaign_info_cache[campaign_id]
+             result.campaign_info[campaign_id] = info
 
-            if is_purchase:
-                result.by_campaign[campaign_id].purchase += count
-                result.by_squad[info.squad].purchase += count
-                result.by_checkout[info.checkout].purchase += count
-                result.by_product[info.product].purchase += count
-                result.total.purchase += count
-            else:
-                result.by_campaign[campaign_id].initiate_checkout += count
-                result.by_squad[info.squad].initiate_checkout += count
-                result.by_checkout[info.checkout].initiate_checkout += count
-                result.by_product[info.product].initiate_checkout += count
-                result.total.initiate_checkout += count
+             aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
+             aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
+             aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
+             aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
 
     return result
 
@@ -388,64 +238,41 @@ async def fetch_all_conversions(
         total_rows += len(rows)
         
         for row in rows:
-            # Validar tipo de conversão
-            conv_type = _get_conversion_type(row)
-            if conv_type is None:
-                # Ignorar tipos que não são Purchase ou InitiateCheckout
-                logger.debug("Ignorando tipo de conversão: %s", row.get("type"))
-                continue
-            
-            filtered_rows += 1
-            
-            campaign_id = _get_campaign_id(row)
-            if not campaign_id:
-                continue
-            
-            campaign_name = _get_campaign_name(row)
-            offer_id = _get_offer_id(row)
-            count = _get_event_count(row)
-            
-            # Extrair informações da campanha (usar cache para performance)
-            if campaign_id not in campaign_info_cache:
-                campaign_info_cache[campaign_id] = extract_campaign_info(
-                    campaign_name, 
-                    campaign_id,
-                    offer_id,
-                )
-            
-            info = campaign_info_cache[campaign_id]
-            result.campaign_info[campaign_id] = info
-            
-            # Agregar por campanha
-            if campaign_id not in result.by_campaign:
-                result.by_campaign[campaign_id] = ConversionMetrics()
-            
-            # Agregar por squad
-            if info.squad not in result.by_squad:
-                result.by_squad[info.squad] = ConversionMetrics()
-            
-            # Agregar por checkout
-            if info.checkout not in result.by_checkout:
-                result.by_checkout[info.checkout] = ConversionMetrics()
-            
-            # Agregar por produto
-            if info.product not in result.by_product:
-                result.by_product[info.product] = ConversionMetrics()
-            
-            # Atualizar contadores
-            if conv_type == "initiatecheckout":
-                result.by_campaign[campaign_id].initiate_checkout += count
-                result.by_squad[info.squad].initiate_checkout += count
-                result.by_checkout[info.checkout].initiate_checkout += count
-                result.by_product[info.product].initiate_checkout += count
-                result.total.initiate_checkout += count
-            elif conv_type == "purchase":
-                result.by_campaign[campaign_id].purchase += count
-                result.by_squad[info.squad].purchase += count
-                result.by_checkout[info.checkout].purchase += count
-                result.by_product[info.product].purchase += count
-                result.total.purchase += count
-        
+             # Validar tipo de conversão
+             conv_type = get_conversion_type(row)
+             if conv_type is None:
+                 # Ignorar tipos que não são Purchase ou InitiateCheckout
+                 logger.debug("Ignorando tipo de conversão: %s", row.get("type"))
+                 continue
+
+             filtered_rows += 1
+
+             campaign_id = get_campaign_id(row)
+             if not campaign_id:
+                 continue
+
+             campaign_name = get_campaign_name(row)
+             offer_name = get_offer_name(row)
+             mapping_source = build_mapping_source_text(campaign_name, offer_name)
+             offer_id = get_offer_id(row)
+             count = get_event_count(row)
+
+             # Extrair informações da campanha (usar cache para performance)
+             if campaign_id not in campaign_info_cache:
+                 campaign_info_cache[campaign_id] = extract_campaign_info(
+                     mapping_source or campaign_name, campaign_id, offer_id,
+                 )
+
+             info = campaign_info_cache[campaign_id]
+             result.campaign_info[campaign_id] = info
+
+             is_purchase = conv_type == "purchase"
+
+             aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
+             aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
+             aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
+             aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
+
         logger.debug("Página %s: %s linhas, %s filtradas", page, len(rows), filtered_rows)
         
         if len(rows) < 1000:
