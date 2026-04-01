@@ -175,13 +175,15 @@
 
 .chartContainer {
   width: 100%;
-  max-width: 980px;
+  min-height: 500px;
   margin: 12px auto;
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
   padding: clamp(12px, 2.5vw, 20px);
+  display: flex;
+  flex-direction: column;
 }
 
 .chartHeader {
@@ -209,13 +211,12 @@
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
-  width: 100%;
-  max-width: 420px;
 }
 
 .chartCanvas {
   width: 100%;
-  height: clamp(300px, 46vw, 380px);
+  flex: 1;
+  min-height: 380px;
 }
 
 .chartDescription {
@@ -302,11 +303,15 @@
   border-radius: var(--radius-lg);
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 430px;
 }
 
 .conversionChartCanvas {
   width: 100%;
-  height: clamp(300px, 42vw, 380px);
+  height: 380px;
+  flex: 1;
 }
 
 .conversionChartEmpty {
@@ -332,6 +337,14 @@
     grid-template-columns: 1fr;
   }
 
+  .chartContainer {
+    min-height: 450px;
+  }
+
+  .chartCanvas {
+    min-height: 350px;
+  }
+
   .conversionChartHeader {
     flex-direction: column;
   }
@@ -339,6 +352,10 @@
   .conversionChartFilters {
     width: 100%;
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .conversionChartCanvas {
+    min-height: 350px;
   }
 }
 
@@ -356,7 +373,19 @@
     align-items: stretch;
   }
 
+  .chartContainer {
+    min-height: 400px;
+  }
+
+  .chartCanvas {
+    min-height: 300px;
+  }
+
   .conversionChartFilters {
     grid-template-columns: 1fr;
+  }
+
+  .conversionChartCanvas {
+    min-height: 300px;
   }
 }

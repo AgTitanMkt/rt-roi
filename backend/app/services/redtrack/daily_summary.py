@@ -8,7 +8,7 @@ import httpx
 from ...core.database import SessionLocal
 from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSummary, DailyConversionEntity
 from ..metrics_service import get_summary as get_summary_metrics
-from .conversions import AggregatedConversions
+from .conversions import AggregatedConversions, extract_campaign_info
 from .http_client import make_request_with_retry
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL
 
@@ -27,10 +27,29 @@ def _q0(value: int | float | Decimal) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
 
+def _normalize_and_format(raw_value: str | None, normalized_value: str | None) -> str:
+    """
+    Normaliza um valor para UPPERCASE.
+    Se o valor normalizado for "unknown", retorna "UNKNOWN (valor_original)"
+
+    Args:
+        raw_value: Valor bruto recebido
+        normalized_value: Valor após normalização/resolução
+
+    Returns:
+        Valor normalizado ou "UNKNOWN (valor_original)" se desconhecido
+    """
+    if not normalized_value or normalized_value.upper() == "UNKNOWN":
+        raw_str = str(raw_value or "").strip() if raw_value else ""
+        if raw_str and raw_str.upper() != "UNKNOWN":
+            return f"UNKNOWN ({raw_str.upper()})"
+        return "UNKNOWN"
+
+    return normalized_value.strip().upper()
+
+
 def _extract_squad_from_campaign_name(campaign_name: str) -> str:
-    parts = [part.strip() for part in str(campaign_name or "").split("|") if part.strip()]
-    responsible = parts[1] if len(parts) > 1 else (parts[0] if parts else "unknown")
-    return (responsible.split("-")[0] or "unknown").strip() or "unknown"
+    return extract_campaign_info(campaign_name).squad
 
 
 async def fetch_daily_summary_rows(
@@ -85,21 +104,25 @@ def persist_daily_summary_snapshot(
     for row in rows:
         campaign_name = str(row.get("campaign") or row.get("campaign_name") or "")
         offer_name = str(row.get("offer") or row.get("offer_name") or "")
-        source_name = campaign_name or offer_name
-        squad = _extract_squad_from_campaign_name(source_name)
-        
+        source_candidates = [value.strip() for value in (campaign_name, offer_name) if str(value or "").strip()]
+        source_name = " | ".join(source_candidates)
+        squad_raw = _extract_squad_from_campaign_name(source_name)
+        # Normalizar squad para UPPERCASE e adicionar valor original se desconhecido
+        squad = _normalize_and_format(squad_raw, squad_raw)
+
         if squad not in by_squad:
             by_squad[squad] = {
-                "cost": Decimal("0"),
-                "profit": Decimal("0"),
-                "revenue": Decimal("0"),
-                "initiate": 0,
-                "purchase": 0,
+                "cost": _q2(float(row.get("cost", 0) or 0)),
+                "profit": _q2(float(row.get("profit", 0) or 0)),
+                "revenue": _q2(float(row.get("revenue", 0) or 0)),
+                "initiate": int(0),
+                "purchase": int(0),
             }
-
-        by_squad[squad]["cost"] += _q2(float(row.get("cost", 0) or 0))
-        by_squad[squad]["profit"] += _q2(float(row.get("profit", 0) or 0))
-        by_squad[squad]["revenue"] += _q2(float(row.get("revenue", 0) or 0))
+        else:
+            # Substituir valores, não adicionar
+            by_squad[squad]["cost"] = _q2(float(row.get("cost", 0) or 0))
+            by_squad[squad]["profit"] = _q2(float(row.get("profit", 0) or 0))
+            by_squad[squad]["revenue"] = _q2(float(row.get("revenue", 0) or 0))
 
         campaign_id = str(row.get("campaign_id") or row.get("campaignId") or row.get("campaign") or "").strip()
         offer_id = str(row.get("offer_id") or row.get("offerId") or row.get("offer") or "").strip()
@@ -254,12 +277,14 @@ def _persist_checkout_summary(
     for checkout, metrics in conversions.by_checkout.items():
         if checkout == "unknown":
             continue
-            
+
+        # Normalizar checkout para UPPERCASE e adicionar valor original se desconhecido
+        checkout_normalized = _normalize_and_format(checkout, checkout)
         conversion_rate = _q2(metrics.conversion_rate)
         
         existing = db.query(DailyCheckoutSummary).filter(
             DailyCheckoutSummary.metric_date == metric_date,
-            DailyCheckoutSummary.checkout == checkout,
+            DailyCheckoutSummary.checkout == checkout_normalized,
             DailyCheckoutSummary.squad == "ALL",
         ).one_or_none()
         
@@ -271,7 +296,7 @@ def _persist_checkout_summary(
             db.add(
                 DailyCheckoutSummary(
                     metric_date=metric_date,
-                    checkout=checkout,
+                    checkout=checkout_normalized,
                     squad="ALL",
                     initiate_checkout=_q0(metrics.initiate_checkout),
                     purchase=_q0(metrics.purchase),
@@ -298,9 +323,10 @@ def _persist_conversion_breakdown(
         if not info:
             continue
 
-        squad = (info.squad or "unknown").strip() or "unknown"
-        checkout = (info.checkout or "unknown").strip() or "unknown"
-        product = (info.product or "unknown").strip() or "unknown"
+        # Normalizar valores para UPPERCASE e adicionar valores originais se desconhecidos
+        squad = _normalize_and_format(info.squad, info.squad)
+        checkout = _normalize_and_format(info.checkout, info.checkout)
+        product = _normalize_and_format(info.product, info.product)
 
         existing = db.query(DailyConversionEntity).filter(
             DailyConversionEntity.metric_date == metric_date,
@@ -349,12 +375,14 @@ def _persist_product_summary(
     for product, metrics in conversions.by_product.items():
         if product == "unknown":
             continue
-            
+
+        # Normalizar product para UPPERCASE e adicionar valor original se desconhecido
+        product_normalized = _normalize_and_format(product, product)
         conversion_rate = _q2(metrics.conversion_rate)
         
         existing = db.query(DailyProductSummary).filter(
             DailyProductSummary.metric_date == metric_date,
-            DailyProductSummary.product == product,
+            DailyProductSummary.product == product_normalized,
             DailyProductSummary.squad == "ALL",
         ).one_or_none()
         
@@ -366,7 +394,7 @@ def _persist_product_summary(
             db.add(
                 DailyProductSummary(
                     metric_date=metric_date,
-                    product=product,
+                    product=product_normalized,
                     squad="ALL",
                     initiate_checkout=_q0(metrics.initiate_checkout),
                     purchase=_q0(metrics.purchase),

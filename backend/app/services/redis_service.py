@@ -23,6 +23,17 @@ def _normalize_source(source):
     return normalized
 
 
+def _normalize_dimension(value):
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized:
+        return None
+    if normalized.lower() in {"all", "todos", "todos os squads"}:
+        return None
+    return normalized
+
+
 def _to_jsonable(value):
     if isinstance(value, Decimal):
         return float(value)
@@ -92,15 +103,17 @@ def invalidate_metrics_cache():
     return deleted
 
 
-def get_summary_cached(db, source=None, period="24h"):
+def get_summary_cached(db, source=None, period="24h", checkout=None, product=None):
     source = _normalize_source(source)
-    cache_key = f"summary:{period}:{source or 'all'}"
+    checkout = _normalize_dimension(checkout)
+    product = _normalize_dimension(product)
+    cache_key = f"summary:v3:{period}:{source or 'all'}:{checkout or 'all'}:{product or 'all'}"
 
     cached = _cache_get(cache_key)
     if _is_summary_payload(cached):
         return cached
 
-    data = get_summary(db, source, period)
+    data = get_summary(db, source, period, checkout=checkout, product=product)
     payload = _to_jsonable(data)
     _cache_set(cache_key, payload)
     return payload

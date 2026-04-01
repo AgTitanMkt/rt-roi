@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   Bar,
   ComposedChart,
@@ -17,98 +17,25 @@ interface ConversionInsightsChartProps {
   isLoading?: boolean;
 }
 
-type GroupBy = "checkout" | "product" | "squad" | "selection";
-
 type ChartRow = {
   label: string;
-  groupBy: GroupBy;
   initiate_checkout: number;
   purchase: number;
   conversion_rate: number;
   volume: number;
 };
 
-const FILTER_ALL = "__all__";
-
 const normalizeLabel = (value: string): string => String(value || "unknown").trim() || "unknown";
-const normalizeKey = (value: string): string => normalizeLabel(value).toLowerCase();
-
-type DimensionMaps = {
-  checkout: Map<string, string>;
-  squad: Map<string, string>;
-  product: Map<string, string>;
-};
-
-const getSortedOptions = (map: Map<string, string>) =>
-  [FILTER_ALL, ...Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], "pt-BR")).map(([key]) => key)];
 
 const ConversionInsightsChart = ({ data, isLoading = false }: ConversionInsightsChartProps) => {
-  const [selectedCheckout, setSelectedCheckout] = useState<string>(FILTER_ALL);
-  const [selectedSquad, setSelectedSquad] = useState<string>(FILTER_ALL);
-  const [selectedProduct, setSelectedProduct] = useState<string>(FILTER_ALL);
-
-  const dimensionMaps = useMemo<DimensionMaps>(() => {
-    const maps: DimensionMaps = {
-      checkout: new Map<string, string>(),
-      squad: new Map<string, string>(),
-      product: new Map<string, string>(),
-    };
-
-    for (const row of data) {
-      const checkoutKey = normalizeKey(row.checkout);
-      const squadKey = normalizeKey(row.squad);
-      const productKey = normalizeKey(row.product);
-
-      if (!maps.checkout.has(checkoutKey)) maps.checkout.set(checkoutKey, normalizeLabel(row.checkout));
-      if (!maps.squad.has(squadKey)) maps.squad.set(squadKey, normalizeLabel(row.squad));
-      if (!maps.product.has(productKey)) maps.product.set(productKey, normalizeLabel(row.product));
-    }
-
-    return maps;
-  }, [data]);
-
-  const checkoutOptions = useMemo(() => getSortedOptions(dimensionMaps.checkout), [dimensionMaps.checkout]);
-  const squadOptions = useMemo(() => getSortedOptions(dimensionMaps.squad), [dimensionMaps.squad]);
-  const productOptions = useMemo(() => getSortedOptions(dimensionMaps.product), [dimensionMaps.product]);
-
-  const filteredRows = useMemo(
-    () =>
-      data.filter((row) => {
-        const squad = normalizeKey(row.squad);
-        const product = normalizeKey(row.product);
-        const checkoutKey = normalizeKey(row.checkout);
-
-        const checkoutMatch = selectedCheckout === FILTER_ALL || checkoutKey === selectedCheckout;
-        const squadMatch = selectedSquad === FILTER_ALL || squad === selectedSquad;
-        const productMatch = selectedProduct === FILTER_ALL || product === selectedProduct;
-
-        return checkoutMatch && squadMatch && productMatch;
-      }),
-    [data, selectedCheckout, selectedSquad, selectedProduct],
-  );
-
-  const groupBy: GroupBy = useMemo(() => {
-    if (selectedCheckout === FILTER_ALL) return "checkout";
-    if (selectedProduct === FILTER_ALL) return "product";
-    if (selectedSquad === FILTER_ALL) return "squad";
-    return "selection";
-  }, [selectedCheckout, selectedProduct, selectedSquad]);
-
+  // Agrupar por checkout como padrão
   const chartData = useMemo(() => {
     const grouped = new Map<string, ChartRow>();
 
-    const getLabel = (row: ConversionBreakdownMetric): string => {
-      if (groupBy === "checkout") return dimensionMaps.checkout.get(normalizeKey(row.checkout)) || normalizeLabel(row.checkout);
-      if (groupBy === "product") return dimensionMaps.product.get(normalizeKey(row.product)) || normalizeLabel(row.product);
-      if (groupBy === "squad") return dimensionMaps.squad.get(normalizeKey(row.squad)) || normalizeLabel(row.squad);
-      return "Seleção atual";
-    };
-
-    for (const row of filteredRows) {
-      const label = getLabel(row);
-      const existing = grouped.get(label) ?? {
-        label,
-        groupBy,
+    for (const row of data) {
+      const checkout = normalizeLabel(row.checkout);
+      const existing = grouped.get(checkout) ?? {
+        label: checkout,
         initiate_checkout: 0,
         purchase: 0,
         conversion_rate: 0,
@@ -118,7 +45,7 @@ const ConversionInsightsChart = ({ data, isLoading = false }: ConversionInsights
       existing.initiate_checkout += Number(row.initiate_checkout || 0);
       existing.purchase += Number(row.purchase || 0);
       existing.volume += Number(row.initiate_checkout || 0);
-      grouped.set(label, existing);
+      grouped.set(checkout, existing);
     }
 
     const rows = Array.from(grouped.values())
@@ -126,16 +53,10 @@ const ConversionInsightsChart = ({ data, isLoading = false }: ConversionInsights
         ...item,
         conversion_rate: item.initiate_checkout > 0 ? (item.purchase / item.initiate_checkout) * 100 : 0,
       }))
-      .sort((a, b) => b.purchase - a.purchase || b.initiate_checkout - a.initiate_checkout)
-      .slice(0, 12);
+      .sort((a, b) => b.purchase - a.purchase || b.initiate_checkout - a.initiate_checkout);
 
     return rows;
-  }, [filteredRows, groupBy, dimensionMaps.checkout, dimensionMaps.product, dimensionMaps.squad]);
-
-  const labelForOption = (kind: keyof DimensionMaps, key: string): string => {
-    if (key === FILTER_ALL) return "Todos";
-    return dimensionMaps[kind].get(key) || key;
-  };
+  }, [data]);
 
   return (
     <section className="conversionChartSection">
@@ -143,40 +64,8 @@ const ConversionInsightsChart = ({ data, isLoading = false }: ConversionInsights
         <div>
           <h2 className="sectionTitle">📈 Análise Interativa de Conversão</h2>
           <p className="conversionChartSubtitle">
-            Volume por Initiate Checkout, compras e taxa de conversão com filtros combináveis.
+            Volume por Initiate Checkout, compras e taxa de conversão.
           </p>
-        </div>
-        <div className="conversionChartFilters">
-          <label>
-            Checkout
-            <select value={selectedCheckout} onChange={(event) => setSelectedCheckout(event.target.value)}>
-              {checkoutOptions.map((option) => (
-                <option key={`checkout-${option}`} value={option}>
-                  {labelForOption("checkout", option)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Squad
-            <select value={selectedSquad} onChange={(event) => setSelectedSquad(event.target.value)}>
-              {squadOptions.map((option) => (
-                <option key={`squad-${option}`} value={option}>
-                  {labelForOption("squad", option)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Produto
-            <select value={selectedProduct} onChange={(event) => setSelectedProduct(event.target.value)}>
-              {productOptions.map((option) => (
-                <option key={`product-${option}`} value={option}>
-                  {labelForOption("product", option)}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
       </div>
 

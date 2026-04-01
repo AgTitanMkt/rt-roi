@@ -1,14 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import "./App.css";
 import ValorCard from "./componentes/ValorCard.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
 import ConversionInsightsChart from "./componentes/ConversionInsightsChart.tsx";
-import {
-  DEFAULT_SQUAD,
-  SQUAD_OPTIONS,
-  useDebouncedValue,
-  useDashboardData,
-} from "./utils/reqs.ts";
+import FilterBar from "./componentes/FilterBar.tsx";
+import { useFilters } from "./context/useFilters.ts";
+import { useFilteredData } from "./hooks/useFilteredData.ts";
 
 const resolveRevenue = (metrics?: {
   revenue?: number | null;
@@ -32,14 +29,10 @@ const getChangePercent = (current: number, previous: number): number => {
 };
 
 function App() {
-  const [selectedSquad, setSelectedSquad] = useState<string>(DEFAULT_SQUAD);
-  const [selectedPeriod, setSelectedPeriod] = useState<"24h" | "daily" | "weekly" | "monthly">("24h");
-  const debouncedSquad = useDebouncedValue(selectedSquad, 250);
-  const debouncedPeriod = useDebouncedValue(selectedPeriod, 250);
-  const backendSquad = debouncedSquad === DEFAULT_SQUAD ? undefined : debouncedSquad;
-
+  const { filters } = useFilters();
   const { summary, hourly, conversionBreakdown, isHealthy, isLoading, error, lastUpdated } =
-    useDashboardData({ squad: backendSquad, period: debouncedPeriod });
+    useFilteredData();
+
 
   const today = summary?.today;
   const yesterday = summary?.yesterday;
@@ -71,39 +64,27 @@ function App() {
   const formatPercentage = (value: number | undefined): number =>
     Number(Math.abs(value ?? 0).toFixed(2));
 
+
   return (
     <div className="dashboardShell">
       <header className="dashboardHeader">
         <div>
           <h1 className="dashboardTitle">Dashboard de Performance</h1>
-          <p className="dashboardSubtitle">Visao consolidada para decisao rapida de performance</p>
+          <p className="dashboardSubtitle">Visão consolidada para decisão rápida de performance</p>
         </div>
         <div className="dashboardHeaderActions">
-          <div className="filterGroup">
-            <label htmlFor="period-select" className="ui-label">
-              Período:
-            </label>
-            <select
-              id="period-select"
-              value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value as "24h" | "daily" | "weekly" | "monthly")}
-              className="ui-select"
-            >
-              <option value="24h">Últimas 24h</option>
-              <option value="daily">Diário</option>
-              <option value="weekly">Semanal</option>
-              <option value="monthly">Mensal</option>
-            </select>
-          </div>
           <div className={`statusPill ${isHealthy ? "isOnline" : "isOffline"}`}>
             {isLoading
               ? "Atualizando dados..."
               : isHealthy
                 ? `Backend online${lastUpdated ? ` - ${new Date(lastUpdated).toLocaleTimeString()}` : ""}`
-                : "Backend indisponivel"}
+                : "Backend indisponível"}
           </div>
         </div>
       </header>
+
+      {/* Filtros Centralizados */}
+      <FilterBar compact={false} showAdvanced={false} />
 
       {error && <div className="errorBanner">Erro: {error}</div>}
 
@@ -163,10 +144,8 @@ function App() {
         <DashboardGrafico1
           hourlyData={hourlyWithResolvedRevenue}
           isLoading={isLoading}
-          selectedSquad={selectedSquad}
-          squadOptions={SQUAD_OPTIONS}
-          onSquadChange={setSelectedSquad}
-          period={selectedPeriod}
+          selectedSquad={filters.squad || ""}
+          period={filters.period}
         />
       </section>
 
