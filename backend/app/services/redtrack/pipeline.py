@@ -11,7 +11,7 @@ from .conversions import (
     extract_campaign_info,
     AggregatedConversions,
 )
-from .daily_summary import fetch_daily_summary_rows, log_cards_preview, persist_daily_summary_snapshot
+from .daily_summary import fetch_daily_summary_rows, persist_daily_summary_snapshot
 from .http_client import make_request_with_retry
 from .persistence import persist_metrics_report
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL, SAO_PAULO_TZ
@@ -263,7 +263,6 @@ async def redtrack_reports() -> RedtrackResponse:
                     conversions=target_conversions,
                 )
 
-            log_cards_preview()
         except Exception as exc:
             logger.error(
                 "❌ Falha ao atualizar snapshot diário no Redtrack: %s. "

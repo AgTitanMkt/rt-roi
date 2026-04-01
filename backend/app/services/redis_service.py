@@ -94,7 +94,7 @@ def invalidate_metrics_cache():
 
 def get_summary_cached(db, source=None, period="24h"):
     source = _normalize_source(source)
-    cache_key = f"summary:{period}:{source or 'all'}"
+    cache_key = f"summary:v2:{period}:{source or 'all'}"
 
     cached = _cache_get(cache_key)
     if _is_summary_payload(cached):

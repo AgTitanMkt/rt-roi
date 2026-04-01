@@ -303,11 +303,15 @@
   border-radius: var(--radius-lg);
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 430px;
 }
 
 .conversionChartCanvas {
   width: 100%;
-  min-height: 380px;
+  height: 380px;
+  flex: 1;
 }
 
 .conversionChartEmpty {

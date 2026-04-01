@@ -2,11 +2,15 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, date
 from typing import Any
 from zoneinfo import ZoneInfo
+import logging
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from ..models.metrics import DailySummary, HourlyMetric
-from .redtrack.mappings import resolve_product
+from .redtrack.mappings import resolve_product, resolve_squad
+from .redtrack.settings import SQUAD_MAPPINGS
+
+logger = logging.getLogger(__name__)
 
 
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
@@ -20,9 +24,27 @@ def _q4(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
 
-def _normalize_squad(value: str | None) -> str:
-    squad = str(value or "").strip()
-    return squad or "unknown"
+ALLOWED_SQUADS = {
+    str(entry.get("value") or "").strip().upper()
+    for entry in SQUAD_MAPPINGS
+    if str(entry.get("value") or "").strip()
+}
+
+
+def _normalize_squad(value: str | None) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    resolved = resolve_squad(raw)
+    if resolved == "unknown":
+        return None
+
+    normalized = str(resolved).strip().upper()
+    if normalized not in ALLOWED_SQUADS:
+        return None
+
+    return normalized
 
 
 def _table_exists(db: Session, table_name: str) -> bool:
@@ -128,14 +150,18 @@ def insert_metrics(db: Session, data: list):
     for item in data:
         campaign_id = str(item.get("id") or "").strip()
         metric_at = item.get("metric_at")
+        normalized_squad = _normalize_squad(item.get("squad"))
         if not campaign_id or metric_at is None:
+            continue
+        if not normalized_squad:
+            # Remove squads legados/fora do padrão antes de inserir.
             continue
 
         unique_payload[(campaign_id, metric_at)] = {
             "campaign_id": campaign_id,
             "offer_id": str(item.get("offer_id") or "").strip() or None,
             "metric_at": metric_at,
-            "squad": _normalize_squad(item.get("squad")),
+            "squad": normalized_squad,
             "checkout": str(item.get("checkout") or "unknown").strip() or "unknown",
             "product": str(item.get("product") or "unknown").strip() or "unknown",
             "cost": _q2(item.get("cost")),
@@ -242,7 +268,10 @@ def insert_metrics(db: Session, data: list):
         metric_date = item["metric_at"].astimezone(SAO_PAULO_TZ).date()
         affected_summary_keys.add((metric_date, item["squad"]))
 
-    _refresh_daily_summary(db, affected_summary_keys)
+    # Fonte de verdade do summary deve ser o snapshot diário (report diário),
+    # não a agregação da tabela horária.
+    # Mantemos o refresh desativado para não contaminar os cards com dados hourly.
+    # _refresh_daily_summary(db, affected_summary_keys)
     db.commit()
 
     return {
@@ -255,22 +284,34 @@ def insert_metrics(db: Session, data: list):
 def get_summary(db: Session, source: str = None, period: str = "24h"):
     sp_today = datetime.now(SAO_PAULO_TZ).date()
 
+    # Usa a última data diária disponível como base dos cards (dia fechado),
+    # evitando valores parciais do dia corrente.
+    latest_date_query = "SELECT MAX(metric_date) AS latest_date FROM tb_daily_metrics_summary"
+    latest_params: dict[str, object] = {}
+    if source:
+        latest_date_query += " WHERE UPPER(squad) = UPPER(:source)"
+        latest_params["source"] = source
+
+    latest_row = db.execute(text(latest_date_query), latest_params).fetchone()
+    latest_daily_date = getattr(latest_row, "latest_date", None) if latest_row else None
+    reference_date = latest_daily_date or (sp_today - timedelta(days=1))
+
     if period == "weekly":
-        current_start = sp_today - timedelta(days=6)
-        current_end = sp_today
+        current_start = reference_date - timedelta(days=6)
+        current_end = reference_date
         previous_end = current_start - timedelta(days=1)
         previous_start = previous_end - timedelta(days=6)
     elif period == "monthly":
-        current_start = sp_today - timedelta(days=29)
-        current_end = sp_today
+        current_start = reference_date - timedelta(days=29)
+        current_end = reference_date
         previous_end = current_start - timedelta(days=1)
         previous_start = previous_end - timedelta(days=29)
     else:
-        # 24h/daily seguem o comportamento original (hoje vs ontem)
-        current_start = sp_today
-        current_end = sp_today
-        previous_start = sp_today - timedelta(days=1)
-        previous_end = sp_today - timedelta(days=1)
+        # 24h/daily devem refletir o snapshot diário fechado (base dos cards).
+        current_start = reference_date
+        current_end = reference_date
+        previous_start = reference_date - timedelta(days=1)
+        previous_end = reference_date - timedelta(days=1)
 
     def _fetch_range_agg(start_date: date, end_date: date):
         query = """
@@ -721,6 +762,7 @@ def get_conversion_breakdown(
     product: str | None = None,
 ) -> list[dict[str, object]]:
     if not _table_exists(db, "tb_daily_conversion_entities"):
+        logger.warning("⚠️ Tabela tb_daily_conversion_entities não existe")
         return []
 
     sp_today = datetime.now(SAO_PAULO_TZ).date()
@@ -734,6 +776,9 @@ def get_conversion_breakdown(
     else:  # 24h ou daily
         date_start = sp_today
         date_end = sp_today
+
+    logger.info(f"🔍 Buscando conversion breakdown: period={period}, squad={squad}, checkout={checkout}, product={product}")
+    logger.info(f"   Data range: {date_start} a {date_end}")
 
     query = """
         SELECT
@@ -767,6 +812,8 @@ def get_conversion_breakdown(
         },
     ).fetchall()
 
+    logger.info(f"   Resultados da query: {len(rows)} linhas retornadas")
+
     normalized: list[dict[str, object]] = []
     for row in rows:
         product_value = resolve_product(str(row.product or "unknown"))
@@ -783,6 +830,8 @@ def get_conversion_breakdown(
                 "checkout_conversion": float(row.checkout_conversion or 0),
             }
         )
+
+    logger.info(f"   Resultados após normalização: {len(normalized)} registros")
 
     return normalized
 

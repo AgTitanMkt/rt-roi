@@ -33,6 +33,12 @@ function App() {
   const { summary, hourly, conversionBreakdown, isHealthy, isLoading, error, lastUpdated } =
     useFilteredData();
 
+  console.log("📊 App.tsx - Data carregado:", {
+    conversionBreakdownLength: conversionBreakdown.length,
+    isLoading,
+    isHealthy,
+  });
+
   const today = summary?.today;
   const yesterday = summary?.yesterday;
   const comparison = summary?.comparison;
@@ -62,6 +68,12 @@ function App() {
 
   const formatPercentage = (value: number | undefined): number =>
     Number(Math.abs(value ?? 0).toFixed(2));
+
+  // Log antes de renderizar
+  console.log("🎬 App.tsx - renderizando componentes:", {
+    conversionBreakdownLength: conversionBreakdown.length,
+    conversionBreakdownFirst: conversionBreakdown[0],
+  });
 
   return (
     <div className="dashboardShell">

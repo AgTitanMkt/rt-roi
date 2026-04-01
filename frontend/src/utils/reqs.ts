@@ -110,7 +110,7 @@ interface UseDashboardDataResult {
 }
 
 const withSquad = (path: string, squad?: string): string => {
-  if (!squad) return path;
+  if (!squad || squad === DEFAULT_SQUAD) return path;
 
   // Compatibilidade com backend atual (query param ainda chamado source).
   const params = new URLSearchParams({ source: squad });
@@ -146,9 +146,17 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   }
 };
 
-export const fetchSummary = (squad?: string, period: string = "24h"): Promise<SummaryResponse> => {
-  const path = `/metrics/summary?period=${period}`;
-  return fetchJson<SummaryResponse>(withSquad(path, squad));
+export const fetchSummary = (
+  squad?: string,
+  period: string = "24h",
+  checkout?: string,
+  product?: string
+): Promise<SummaryResponse> => {
+  let path = `/metrics/summary?period=${period}`;
+  if (squad && squad !== DEFAULT_SQUAD) path += `&source=${squad}`;
+  if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${checkout}`;
+  if (product && product !== DEFAULT_SQUAD) path += `&product=${product}`;
+  return fetchJson<SummaryResponse>(path);
 };
 
 export const fetchHourly = (squad?: string, period: string = "24h"): Promise<HourlyMetric[]> => {
@@ -177,9 +185,10 @@ export const fetchConversionBreakdown = (
   product?: string,
 ): Promise<ConversionBreakdownMetric[]> => {
   let path = `/metrics/conversion-breakdown?period=${period}`;
-  if (squad) path += `&squad=${squad}`;
-  if (checkout) path += `&checkout=${checkout}`;
-  if (product) path += `&product=${product}`;
+  // Não enviar "all" como squad - deixar em branco significa todos os squads
+  if (squad && squad !== DEFAULT_SQUAD) path += `&squad=${squad}`;
+  if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${checkout}`;
+  if (product && product !== DEFAULT_SQUAD) path += `&product=${product}`;
   return fetchJson<ConversionBreakdownMetric[]>(path);
 };
 

@@ -18,7 +18,7 @@ from ..services.metrics_service import (
     get_squad_checkout_summary,
     get_conversion_breakdown,
 )
-from ..services.filter_service import FilterService, ResponseBuilder
+from ..services.filter_service import FilterService
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -47,6 +47,8 @@ def get_db():
     description=(
         "Retorna os valores agregados de custo, lucro e ROI.\n\n"
         "- `source` (opcional): filtra os dados por origem de tráfego.\n"
+        "- `checkout` (opcional): filtra por tipo de checkout.\n"
+        "- `product` (opcional): filtra por produto.\n"
         "- Sem autenticação no estado atual do projeto."
     ),
     response_model=SummaryResponse,
@@ -73,9 +75,18 @@ def get_summary(
             description="Squad/Origem de tráfego para filtrar os dados (ex.: yts, ytf)",
             examples=["yts", "ytf"],
         ),
+        checkout: str | None = Query(
+            default=None,
+            description="Filtro opcional de checkout (ex.: Cartpanda, Clickbank) - atualmente não afeta summary",
+        ),
+        product: str | None = Query(
+            default=None,
+            description="Filtro opcional de produto - atualmente não afeta summary",
+        ),
         db: Session = Depends(get_db)
 ):
     # Normalizar filtros usando FilterService
+    # Nota: checkout e product são aceitos mas não aplicados ao summary (dados não agregados por essas dimensões)
     filters = FilterService.build_filters(period=period, source=source)
 
     result = get_summary_cached(db, filters.source, filters.period)
@@ -107,8 +118,7 @@ def get_summary(
         }
     }
 
-    # Retornar com meta de filtros aplicados
-    return ResponseBuilder.build_single_response(summary_data, filters)
+    return summary_data
 
 @router.get(
     "/hourly",
@@ -178,7 +188,7 @@ def get_hourly(
         for row in rows
     ]
 
-    return ResponseBuilder.build_list_response(data, filters)
+    return data
 
 @router.get(
     "/hourly/period",
@@ -230,7 +240,7 @@ def get_hourly_period(
         for row in rows
     ]
 
-    return ResponseBuilder.build_list_response(data, filters)
+    return data
 
 
 @router.get(
@@ -284,7 +294,7 @@ def get_by_checkout(
     """
     filters = FilterService.build_filters(period=period, source=source)
     data = get_checkout_summary(db, filters.source, filters.period)
-    return ResponseBuilder.build_list_response(data, filters)
+    return data
 
 
 @router.get(
@@ -338,7 +348,7 @@ def get_by_product(
     """
     filters = FilterService.build_filters(period=period, source=source)
     data = get_product_summary(db, filters.source, filters.period)
-    return ResponseBuilder.build_list_response(data, filters)
+    return data
 
 
 @router.get(
@@ -382,7 +392,7 @@ def get_by_squad(
     """
     filters = FilterService.build_filters(period=period)
     data = get_squad_checkout_summary(db, filters.period)
-    return ResponseBuilder.build_list_response(data, filters)
+    return data
 
 
 @router.get(
@@ -421,5 +431,5 @@ def get_conversion_breakdown_route(
         checkout=filters.checkout,
         product=filters.product,
     )
-    return ResponseBuilder.build_list_response(data, filters)
+    return data
 

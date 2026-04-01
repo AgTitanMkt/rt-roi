@@ -99,7 +99,7 @@ export const useFilteredData = ({
         squadsResult,
         breakdownResult,
       ] = await Promise.allSettled([
-        fetchSummary(params.source, params.period),
+        fetchSummary(params.source, params.period, params.checkout, params.product),
         fetchHourly(params.source, params.period),
         fetchCheckoutMetrics(params.source, params.period),
         fetchProductMetrics(params.source, params.period),
@@ -145,8 +145,13 @@ export const useFilteredData = ({
 
       if (breakdownResult.status === "fulfilled") {
         setConversionBreakdown(breakdownResult.value);
+        console.log("✅ Conversion breakdown carregado:", {
+          total: breakdownResult.value.length,
+          primeiro: breakdownResult.value[0],
+        });
       } else {
         setConversionBreakdown([]);
+        console.error("❌ Erro ao carregar conversion breakdown:", breakdownResult.reason);
       }
 
       if (errors.length > 0) {

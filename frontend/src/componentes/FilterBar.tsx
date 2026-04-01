@@ -1,7 +1,7 @@
 import React from "react";
 import { useFilters } from "../context/useFilters";
 import type { Filters } from "../context/filterContextTypes";
-import { PERIOD_OPTIONS, SQUAD_OPTIONS, CHECKOUT_OPTIONS } from "../utils/filterOptions";
+import { PERIOD_OPTIONS, SQUAD_OPTIONS, CHECKOUT_OPTIONS, PRODUCT_OPTIONS } from "../utils/filterOptions";
 import "./FilterBar.css";
 
 
@@ -40,7 +40,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     onFiltersChange?.({ ...filters, checkout });
   };
 
-  const handleProductChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProductChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const product = e.target.value || undefined;
     updateFilter("product", product);
     onFiltersChange?.({ ...filters, product });
@@ -163,59 +163,49 @@ export const FilterBar: React.FC<FilterBarProps> = ({
            </div>
 
            <div className="filterBar__group">
-             <label htmlFor="product-input" className="filterBar__label">
+             <label htmlFor="product-select" className="filterBar__label">
                Produto
              </label>
-             <input
-               id="product-input"
-               type="text"
-               placeholder="Ex: ErosLift"
+             <select
+               id="product-select"
                value={filters.product || ""}
                onChange={handleProductChange}
-               className="filterBar__input"
-             />
+               className="filterBar__select"
+             >
+               {PRODUCT_OPTIONS.map((opt) => (
+                 <option key={opt.value} value={opt.value}>
+                   {opt.label}
+                 </option>
+               ))}
+             </select>
            </div>
 
            <button onClick={handleReset} className="filterBar__reset">
              Limpar Filtros
            </button>
-        </div>
+         </div>
 
-        {/* Linha 2: Filtros avançados (opcional) */}
-        {showAdvanced && (
-          <div className="filterBar__row filterBar__row--advanced">
-            <div className="filterBar__group">
-              <label htmlFor="product-input" className="filterBar__label">
-                Produto
-              </label>
-              <input
-                id="product-input"
-                type="text"
-                placeholder="Ex: ErosLift"
-                value={filters.product || ""}
-                onChange={handleProductChange}
-                className="filterBar__input"
-              />
-            </div>
+         {/* Linha 2: Filtros avançados (opcional) */}
+         {showAdvanced && (
+           <div className="filterBar__row filterBar__row--advanced">
+             <div className="filterBar__group">
+               <label htmlFor="offer-input" className="filterBar__label">
+                 Oferta ID
+               </label>
+               <input
+                 id="offer-input"
+                 type="text"
+                 placeholder="Ex: 12345"
+                 value={filters.offer || ""}
+                 onChange={handleOfferChange}
+                 className="filterBar__input"
+               />
+             </div>
 
-            <div className="filterBar__group">
-              <label htmlFor="offer-input" className="filterBar__label">
-                Oferta ID
-              </label>
-              <input
-                id="offer-input"
-                type="text"
-                placeholder="Ex: 12345"
-                value={filters.offer || ""}
-                onChange={handleOfferChange}
-                className="filterBar__input"
-              />
-            </div>
-
-            {/* Espaço para mais filtros no futuro */}
-          </div>
-        )}
-      </div>
+             {/* Espaço para mais filtros no futuro */}
+           </div>
+         )}
+       </div>
     </div>
   );
 };
