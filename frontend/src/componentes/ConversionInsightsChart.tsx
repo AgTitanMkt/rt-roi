@@ -28,18 +28,8 @@ type ChartRow = {
 const normalizeLabel = (value: string): string => String(value || "unknown").trim() || "unknown";
 
 const ConversionInsightsChart = ({ data, isLoading = false }: ConversionInsightsChartProps) => {
-  // Log imediato ao renderizar o componente
-  console.log("🎯 ConversionInsightsChart renderizando:", {
-    dataLength: data?.length,
-    isLoading,
-    dataType: typeof data,
-  });
-
   // Agrupar por checkout como padrão
   const chartData = useMemo(() => {
-    console.log("🔍 ConversionInsightsChart recebeu dados:", data);
-    console.log("   Total de registros:", data.length);
-
     const grouped = new Map<string, ChartRow>();
 
     for (const row of data) {
@@ -65,7 +55,6 @@ const ConversionInsightsChart = ({ data, isLoading = false }: ConversionInsights
       }))
       .sort((a, b) => b.purchase - a.purchase || b.initiate_checkout - a.initiate_checkout);
 
-    console.log("   Dados processados para o gráfico:", rows);
     return rows;
   }, [data]);
 

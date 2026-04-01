@@ -77,19 +77,24 @@ def get_summary(
         ),
         checkout: str | None = Query(
             default=None,
-            description="Filtro opcional de checkout (ex.: Cartpanda, Clickbank) - atualmente não afeta summary",
+            description="Filtro opcional de checkout (ex.: Cartpanda, Clickbank)",
         ),
         product: str | None = Query(
             default=None,
-            description="Filtro opcional de produto - atualmente não afeta summary",
+            description="Filtro opcional de produto",
         ),
         db: Session = Depends(get_db)
 ):
     # Normalizar filtros usando FilterService
-    # Nota: checkout e product são aceitos mas não aplicados ao summary (dados não agregados por essas dimensões)
-    filters = FilterService.build_filters(period=period, source=source)
+    filters = FilterService.build_filters(period=period, source=source, checkout=checkout, product=product)
 
-    result = get_summary_cached(db, filters.source, filters.period)
+    result = get_summary_cached(
+        db,
+        filters.source,
+        filters.period,
+        checkout=filters.checkout,
+        product=filters.product,
+    )
 
     if not isinstance(result, dict) or "today" not in result:
         result = _empty_summary_payload()
@@ -212,6 +217,14 @@ def get_hourly_period(
         description="Squad/Origem de tráfego para filtrar os dados",
         examples=["yts", "ytf"],
     ),
+    checkout: str | None = Query(
+        default=None,
+        description="Filtro opcional de checkout (ex.: Cartpanda, Clickbank)",
+    ),
+    product: str | None = Query(
+        default=None,
+        description="Filtro opcional de produto",
+    ),
     db: Session = Depends(get_db)
 ):
     """
@@ -222,8 +235,14 @@ def get_hourly_period(
     - weekly: últimos 7 dias
     - monthly: últimos 30 dias
     """
-    filters = FilterService.build_filters(period=period, source=source)
-    rows = get_metrics_by_period(db, filters.period, filters.source)
+    filters = FilterService.build_filters(period=period, source=source, checkout=checkout, product=product)
+    rows = get_metrics_by_period(
+        db,
+        filters.period,
+        filters.source,
+        checkout=filters.checkout,
+        product=filters.product,
+    )
 
     data = [
         {

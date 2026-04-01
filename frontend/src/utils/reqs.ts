@@ -159,9 +159,17 @@ export const fetchSummary = (
   return fetchJson<SummaryResponse>(path);
 };
 
-export const fetchHourly = (squad?: string, period: string = "24h"): Promise<HourlyMetric[]> => {
-  const path = `/metrics/hourly/period?period=${period}`;
-  return fetchJson<HourlyMetric[]>(withSquad(path, squad));
+export const fetchHourly = (
+  squad?: string,
+  period: string = "24h",
+  checkout?: string,
+  product?: string,
+): Promise<HourlyMetric[]> => {
+  let path = `/metrics/hourly/period?period=${period}`;
+  if (squad && squad !== DEFAULT_SQUAD) path += `&source=${squad}`;
+  if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${checkout}`;
+  if (product && product !== DEFAULT_SQUAD) path += `&product=${product}`;
+  return fetchJson<HourlyMetric[]>(path);
 };
 
 export const fetchCheckoutMetrics = (squad?: string, period: string = "24h"): Promise<CheckoutMetric[]> => {

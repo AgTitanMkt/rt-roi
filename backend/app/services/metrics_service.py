@@ -281,20 +281,31 @@ def insert_metrics(db: Session, data: list):
     }
 
 
-def get_summary(db: Session, source: str = None, period: str = "24h"):
+def get_summary(
+    db: Session,
+    source: str = None,
+    period: str = "24h",
+    checkout: str | None = None,
+    product: str | None = None,
+):
     sp_today = datetime.now(SAO_PAULO_TZ).date()
 
-    # Usa a última data diária disponível como base dos cards (dia fechado),
-    # evitando valores parciais do dia corrente.
-    latest_date_query = "SELECT MAX(metric_date) AS latest_date FROM tb_daily_metrics_summary"
-    latest_params: dict[str, object] = {}
-    if source:
-        latest_date_query += " WHERE UPPER(squad) = UPPER(:source)"
-        latest_params["source"] = source
+    use_hourly_for_summary = bool(checkout or product)
 
-    latest_row = db.execute(text(latest_date_query), latest_params).fetchone()
-    latest_daily_date = getattr(latest_row, "latest_date", None) if latest_row else None
-    reference_date = latest_daily_date or (sp_today - timedelta(days=1))
+    # Sem filtros de checkout/produto, mantém base diária fechada (cards estáveis).
+    if not use_hourly_for_summary:
+        latest_date_query = "SELECT MAX(metric_date) AS latest_date FROM tb_daily_metrics_summary"
+        latest_params: dict[str, object] = {}
+        if source:
+            latest_date_query += " WHERE UPPER(squad) = UPPER(:source)"
+            latest_params["source"] = source
+
+        latest_row = db.execute(text(latest_date_query), latest_params).fetchone()
+        latest_daily_date = getattr(latest_row, "latest_date", None) if latest_row else None
+        reference_date = latest_daily_date or (sp_today - timedelta(days=1))
+    else:
+        # Com filtros de checkout/produto, usa base horária (única com essas dimensões).
+        reference_date = sp_today
 
     if period == "weekly":
         current_start = reference_date - timedelta(days=6)
@@ -314,6 +325,29 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
         previous_end = reference_date - timedelta(days=1)
 
     def _fetch_range_agg(start_date: date, end_date: date):
+        if use_hourly_for_summary:
+            query = """
+                SELECT
+                    SUM(cost) as cost,
+                    SUM(profit) as profit,
+                    SUM(revenue) as revenue,
+                    ROUND(AVG(checkout_conversion), 2) as checkout_avg,
+                    ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
+                FROM tb_hourly_metrics
+                WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :start_date AND :end_date
+                  AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+                  AND (:checkout IS NULL OR UPPER(checkout_type) = UPPER(:checkout))
+                  AND (:product IS NULL OR UPPER(product) = UPPER(:product))
+            """
+            params: dict[str, object] = {
+                "start_date": start_date,
+                "end_date": end_date,
+                "source": source,
+                "checkout": checkout,
+                "product": product,
+            }
+            return db.execute(text(query), params).fetchone()
+
         query = """
             SELECT
                 SUM(cost) as cost,
@@ -325,7 +359,7 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
             WHERE metric_date BETWEEN :start_date AND :end_date
         """
 
-        params: dict[str, object] = {
+        params = {
             "start_date": start_date,
             "end_date": end_date,
         }
@@ -338,8 +372,12 @@ def get_summary(db: Session, source: str = None, period: str = "24h"):
 
     current_data = _fetch_range_agg(current_start, current_end)
     previous_data = _fetch_range_agg(previous_start, previous_end)
-    current_checkout = _get_checkout_conversion_range(db, current_start, current_end, source)
-    previous_checkout = _get_checkout_conversion_range(db, previous_start, previous_end, source)
+    if use_hourly_for_summary:
+        current_checkout = _q2(getattr(current_data, "checkout_avg", 0) or 0)
+        previous_checkout = _q2(getattr(previous_data, "checkout_avg", 0) or 0)
+    else:
+        current_checkout = _get_checkout_conversion_range(db, current_start, current_end, source)
+        previous_checkout = _get_checkout_conversion_range(db, previous_start, previous_end, source)
 
     result_obj = {
         "today": {
@@ -439,7 +477,13 @@ def get_metrics_by_hour(db: Session, source: str = None):
     return result.fetchall()
 
 
-def get_metrics_by_period(db: Session, period: str = "24h", source: str = None):
+def get_metrics_by_period(
+    db: Session,
+    period: str = "24h",
+    source: str = None,
+    checkout: str | None = None,
+    product: str | None = None,
+):
     """
     Retorna métricas para um período específico.
     
@@ -498,6 +542,8 @@ def get_metrics_by_period(db: Session, period: str = "24h", source: str = None):
         FROM tb_hourly_metrics
         WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :date_start AND :date_end
           AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+          AND (:checkout IS NULL OR UPPER(checkout_type) = UPPER(:checkout))
+          AND (:product IS NULL OR UPPER(product) = UPPER(:product))
         GROUP BY
             date_trunc('hour', timezone('America/Sao_Paulo', metric_at)),
             EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at)),
@@ -512,6 +558,8 @@ def get_metrics_by_period(db: Session, period: str = "24h", source: str = None):
         "date_start": date_start,
         "date_end": date_end,
         "source": source,
+        "checkout": checkout,
+        "product": product,
     }
     
     result = db.execute(text(query), params)
