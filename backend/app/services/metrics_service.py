@@ -1,6 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, date
-from typing import Any
+from typing import TypedDict
 from zoneinfo import ZoneInfo
 import logging
 
@@ -44,7 +44,7 @@ def _normalize_dimension_value(raw: str | None, resolved: str | None) -> str:
     return raw_value.upper()
 
 
-def _normalize_squad(value: str | None) -> str | None:
+def _normalize_squad(value: str | None) -> str:
     raw = str(value or "").strip()
     if not raw:
         return "UNKNOWN"
@@ -57,6 +57,21 @@ def _normalize_squad(value: str | None) -> str | None:
         return normalized
 
     return normalized
+
+
+class MetricPayload(TypedDict):
+    campaign_id: str
+    offer_id: str | None
+    metric_at: datetime
+    squad: str
+    checkout: str
+    product: str
+    cost: Decimal
+    profit: Decimal
+    revenue: Decimal
+    roi: Decimal
+    checkout_conversion: Decimal
+    is_cumulative: bool
 
 
 def _normalize_checkout(value: str | None) -> str:
@@ -170,7 +185,7 @@ def insert_metrics(db: Session, data: list):
     if not data:
         return {"inserted": 0, "updated": 0, "ignored": 0}
 
-    unique_payload: dict[tuple[str, datetime], dict] = {}
+    unique_payload: dict[tuple[str, datetime], MetricPayload] = {}
     for item in data:
         campaign_id = str(item.get("id") or "").strip()
         metric_at = item.get("metric_at")
@@ -207,7 +222,7 @@ def insert_metrics(db: Session, data: list):
             continue
         previous_targets.append((item["campaign_id"], metric_at - timedelta(hours=1)))
 
-    previous_by_key: dict[tuple[object, object], Any] = {}
+    previous_by_key: dict[tuple[str, datetime], HourlyMetric] = {}
     if previous_targets:
         previous_campaign_ids = list({campaign_id for campaign_id, _ in previous_targets})
         previous_metric_ats = list({metric_at for _, metric_at in previous_targets})
@@ -230,15 +245,21 @@ def insert_metrics(db: Session, data: list):
         if not previous_row:
             continue
 
-        for field, prev_raw in (
-            ("cost", previous_row.cost),
-            ("profit", previous_row.profit),
-            ("revenue", previous_row.revenue),
-            ("checkout_conversion", previous_row.checkout_conversion),
-        ):
-            current_value = Decimal(str(item[field] or 0))
-            previous_value = Decimal(str(prev_raw or 0))
-            item[field] = _q2(max(current_value - previous_value, Decimal("0")))
+        current_cost = Decimal(str(item["cost"] or 0))
+        previous_cost = Decimal(str(previous_row.cost or 0))
+        item["cost"] = _q2(max(current_cost - previous_cost, Decimal("0")))
+
+        current_profit = Decimal(str(item["profit"] or 0))
+        previous_profit = Decimal(str(previous_row.profit or 0))
+        item["profit"] = _q2(max(current_profit - previous_profit, Decimal("0")))
+
+        current_revenue = Decimal(str(item["revenue"] or 0))
+        previous_revenue = Decimal(str(previous_row.revenue or 0))
+        item["revenue"] = _q2(max(current_revenue - previous_revenue, Decimal("0")))
+
+        current_checkout = Decimal(str(item["checkout_conversion"] or 0))
+        previous_checkout = Decimal(str(previous_row.checkout_conversion or 0))
+        item["checkout_conversion"] = _q2(max(current_checkout - previous_checkout, Decimal("0")))
 
         item["roi"] = _q4((item["profit"] / item["cost"]) if item["cost"] > 0 else 0)
 
@@ -325,8 +346,9 @@ def get_summary(
             latest_params["source"] = source
 
         latest_row = db.execute(text(latest_date_query), latest_params).fetchone()
-        latest_daily_date = getattr(latest_row, "latest_date", None) if latest_row else None
-        reference_date = latest_daily_date or sp_today
+        latest_daily_date_raw = getattr(latest_row, "latest_date", None) if latest_row else None
+        latest_daily_date = latest_daily_date_raw if isinstance(latest_daily_date_raw, date) else None
+        reference_date: date = latest_daily_date or sp_today
     else:
         # Com filtros de checkout/produto, usa base horária (única com essas dimensões).
         reference_date = sp_today
@@ -383,7 +405,7 @@ def get_summary(
             WHERE metric_date BETWEEN :start_date AND :end_date
         """
 
-        params = {
+        params: dict[str, object] = {
             "start_date": start_date,
             "end_date": end_date,
         }

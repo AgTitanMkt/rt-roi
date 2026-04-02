@@ -192,7 +192,7 @@ const DashboardGrafico = ({
   const relacaoMin = Math.min(...relacaoValores, 0);
   const relacaoMax = Math.max(...relacaoValores, 0);
   const relacaoPadding = Math.max((relacaoMax - relacaoMin) * 0.2, 0.2);
-  const relacaoBaseMin = relacaoMin < 0 ? relacaoMin - relacaoPadding : 0;
+  const relacaoBaseMin = relacaoMin < 1 ? relacaoMin - relacaoPadding : 0;
   const relacaoBaseMax = relacaoMax + relacaoPadding;
   const relacaoSpan = Math.max(relacaoBaseMax - relacaoBaseMin, 1);
   // Empurra o piso do eixo para baixo para manter a linha de ROI no topo visual.
@@ -202,7 +202,7 @@ const DashboardGrafico = ({
   ];
 
   const labelsNegativos = dadosUnificados
-    .filter((d) => d.relacao < 0)
+    .filter((d) => d.relacao < 1)
     .map((d) => d.xKey);
 
   const tooltipLabels = useMemo(
@@ -346,7 +346,7 @@ const DashboardGrafico = ({
                 dataKey="relacao"
                 stroke="#22c55e"
                 dot={({ cx, cy, payload }) => {
-                  const isNegative = Number(payload?.relacao ?? 0) < 0;
+                  const isNegative = Number(payload?.relacao ?? 0) < 1;
 
                   return (
                     <circle
