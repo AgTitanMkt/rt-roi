@@ -70,13 +70,13 @@ const ConversionInsightsChart = ({ data, isLoading = false }: ConversionInsights
       </div>
 
       <div className="conversionChartCard">
-        {isLoading ? (
+        {isLoading && chartData.length === 0 ? (
           <p className="conversionChartEmpty">Carregando dados de conversão...</p>
         ) : chartData.length === 0 ? (
           <p className="conversionChartEmpty">Nenhum dado encontrado para os filtros aplicados</p>
         ) : (
           <div className="conversionChartCanvas">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={360} minWidth={0} minHeight={320}>
               <ComposedChart data={chartData} margin={{ top: 12, right: 18, left: 6, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(51, 65, 85, 0.55)" vertical={false} />
                 <XAxis dataKey="label" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />

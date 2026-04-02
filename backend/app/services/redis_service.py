@@ -103,15 +103,41 @@ def invalidate_metrics_cache():
     return deleted
 
 
-def get_summary_cached(db, source=None, period="24h", checkout=None, product=None):
+def invalidate_summary_cache(period=None, source=None, checkout=None, product=None):
+    source = _normalize_source(source)
+    checkout = _normalize_dimension(checkout)
+    product = _normalize_dimension(product)
+
+    # Invalida chave específica quando filtros completos são informados.
+    if period is not None:
+        exact_key = f"summary:v3:{period}:{source or 'all'}:{checkout or 'all'}:{product or 'all'}"
+        try:
+            return redis_client.delete(exact_key)
+        except redis.RedisError as exc:
+            logger.warning("Redis invalidação falhou para %s: %s", exact_key, exc)
+            return 0
+
+    deleted = 0
+    try:
+        for key in redis_client.scan_iter(match="summary:v3:*", count=200):
+            deleted += redis_client.delete(key)
+    except redis.RedisError as exc:
+        logger.warning("Redis invalidação falhou para summary:v3:*: %s", exc)
+    return deleted
+
+
+def get_summary_cached(db, source=None, period="24h", checkout=None, product=None, force_refresh=False):
     source = _normalize_source(source)
     checkout = _normalize_dimension(checkout)
     product = _normalize_dimension(product)
     cache_key = f"summary:v3:{period}:{source or 'all'}:{checkout or 'all'}:{product or 'all'}"
 
-    cached = _cache_get(cache_key)
-    if _is_summary_payload(cached):
-        return cached
+    if not force_refresh:
+        cached = _cache_get(cache_key)
+        if _is_summary_payload(cached):
+            return cached
+    else:
+        invalidate_summary_cache(period=period, source=source, checkout=checkout, product=product)
 
     data = get_summary(db, source, period, checkout=checkout, product=product)
     payload = _to_jsonable(data)

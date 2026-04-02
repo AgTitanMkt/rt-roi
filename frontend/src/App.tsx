@@ -134,7 +134,6 @@ function App() {
             categoria={formatPercentage(comparison?.roi_change)}
             tendencia={(comparison?.roi_change ?? 0) < 0 ? "baixa" : "alta"}
             prefixo=""
-            sufixo="%"
             className="isHighlight"
           />
         </section>

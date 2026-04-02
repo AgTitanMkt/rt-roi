@@ -49,28 +49,36 @@ class FilterService:
         """Resolve squad para canônico via settings."""
         if not squad:
             return None
-        # Usa mapeamento centralizado
-        resolved = resolve_squad(squad)
-        # Retorna None se for "unknown" (sem match)
-        return resolved if resolved != "unknown" else None
+        raw = FilterService.normalize_string(squad)
+        if not raw:
+            return None
+
+        resolved = resolve_squad(raw)
+        return resolved if resolved != "unknown" else raw
 
     @staticmethod
     def resolve_checkout_filter(checkout: Optional[str]) -> Optional[str]:
         """Resolve checkout para canônico via settings."""
         if not checkout:
             return None
-        # Usa mapeamento centralizado
-        resolved = resolve_checkout(checkout)
-        # Retorna None se for "unknown" (sem match)
-        return resolved if resolved != "unknown" else None
+        raw = FilterService.normalize_string(checkout)
+        if not raw:
+            return None
+
+        resolved = resolve_checkout(raw)
+        return resolved if resolved != "unknown" else raw
 
     @staticmethod
     def resolve_product_filter(product: Optional[str]) -> Optional[str]:
         """Resolve product para canônico via settings."""
         if not product:
             return None
-        resolved = resolve_product(product)
-        return resolved if resolved != "unknown" else None
+        raw = FilterService.normalize_string(product)
+        if not raw:
+            return None
+
+        resolved = resolve_product(raw)
+        return resolved if resolved != "unknown" else raw
 
     @classmethod
     def build_filters(

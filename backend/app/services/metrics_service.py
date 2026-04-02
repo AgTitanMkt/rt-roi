@@ -7,7 +7,7 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from ..models.metrics import DailySummary, HourlyMetric
-from .redtrack.mappings import resolve_product, resolve_squad
+from .redtrack.mappings import resolve_product, resolve_squad, resolve_checkout
 from .redtrack.settings import SQUAD_MAPPINGS
 
 logger = logging.getLogger(__name__)
@@ -31,20 +31,44 @@ ALLOWED_SQUADS = {
 }
 
 
+def _normalize_dimension_value(raw: str | None, resolved: str | None) -> str:
+    raw_value = str(raw or "").strip()
+    if not raw_value:
+        return "UNKNOWN"
+
+    resolved_value = str(resolved or "").strip()
+    if resolved_value and resolved_value.lower() != "unknown":
+        return resolved_value.upper()
+
+    # Mantem o valor original quando o mapeamento nao encontra alias.
+    return raw_value.upper()
+
+
 def _normalize_squad(value: str | None) -> str | None:
     raw = str(value or "").strip()
     if not raw:
-        return None
+        return "UNKNOWN"
 
     resolved = resolve_squad(raw)
-    if resolved == "unknown":
-        return None
+    normalized = _normalize_dimension_value(raw, resolved)
 
-    normalized = str(resolved).strip().upper()
-    if normalized not in ALLOWED_SQUADS:
-        return None
+    # Se esta entre os squads canonicos, mantem formato esperado.
+    if normalized in ALLOWED_SQUADS:
+        return normalized
 
     return normalized
+
+
+def _normalize_checkout(value: str | None) -> str:
+    raw = str(value or "").strip()
+    resolved = resolve_checkout(raw)
+    return _normalize_dimension_value(raw, resolved)
+
+
+def _normalize_product(value: str | None) -> str:
+    raw = str(value or "").strip()
+    resolved = resolve_product(raw)
+    return _normalize_dimension_value(raw, resolved)
 
 
 def _table_exists(db: Session, table_name: str) -> bool:
@@ -153,17 +177,14 @@ def insert_metrics(db: Session, data: list):
         normalized_squad = _normalize_squad(item.get("squad"))
         if not campaign_id or metric_at is None:
             continue
-        if not normalized_squad:
-            # Remove squads legados/fora do padrão antes de inserir.
-            continue
 
         unique_payload[(campaign_id, metric_at)] = {
             "campaign_id": campaign_id,
             "offer_id": str(item.get("offer_id") or "").strip() or None,
             "metric_at": metric_at,
             "squad": normalized_squad,
-            "checkout": str(item.get("checkout") or "unknown").strip() or "unknown",
-            "product": str(item.get("product") or "unknown").strip() or "unknown",
+            "checkout": _normalize_checkout(item.get("checkout")),
+            "product": _normalize_product(item.get("product")),
             "cost": _q2(item.get("cost")),
             "profit": _q2(item.get("profit")),
             "revenue": _q2(item.get("revenue")),
@@ -292,9 +313,12 @@ def get_summary(
 
     use_hourly_for_summary = bool(checkout or product)
 
-    # Sem filtros de checkout/produto, mantém base diária fechada (cards estáveis).
+    # Sem filtros de checkout/produto, usa o snapshot diário mais recente disponível.
     if not use_hourly_for_summary:
-        latest_date_query = "SELECT MAX(metric_date) AS latest_date FROM tb_daily_metrics_summary"
+        latest_date_query = """
+            SELECT MAX(metric_date) AS latest_date
+            FROM tb_daily_metrics_summary
+        """
         latest_params: dict[str, object] = {}
         if source:
             latest_date_query += " WHERE UPPER(squad) = UPPER(:source)"
@@ -302,7 +326,7 @@ def get_summary(
 
         latest_row = db.execute(text(latest_date_query), latest_params).fetchone()
         latest_daily_date = getattr(latest_row, "latest_date", None) if latest_row else None
-        reference_date = latest_daily_date or (sp_today - timedelta(days=1))
+        reference_date = latest_daily_date or sp_today
     else:
         # Com filtros de checkout/produto, usa base horária (única com essas dimensões).
         reference_date = sp_today
@@ -600,7 +624,6 @@ def get_checkout_summary(db: Session, squad: str = None, period: str = "24h"):
             END as checkout_conversion
         FROM tb_daily_checkout_summary
         WHERE metric_date BETWEEN :date_start AND :date_end
-          AND checkout != 'unknown'
     """
     
     params: dict[str, object] = {
@@ -659,7 +682,6 @@ def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
             END as checkout_conversion
         FROM tb_daily_product_summary
         WHERE metric_date BETWEEN :date_start AND :date_end
-          AND product != 'unknown'
     """
     
     params: dict[str, object] = {
@@ -679,9 +701,9 @@ def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
     # Consolida aliases no mesmo produto canônico para resposta consistente.
     grouped: dict[str, dict[str, int | float]] = {}
     for row in rows:
-        product = resolve_product(str(row.product or "unknown"))
-        if product == "unknown":
-            continue
+        product_raw = str(row.product or "").strip()
+        product_resolved = resolve_product(product_raw)
+        product = product_resolved if product_resolved != "unknown" else (product_raw or "UNKNOWN")
 
         agg = grouped.setdefault(
             product,
@@ -740,7 +762,6 @@ def get_squad_checkout_summary(db: Session, period: str = "24h"):
                     SUM(revenue) AS revenue
                 FROM tb_daily_metrics_summary
                 WHERE metric_date BETWEEN :date_start AND :date_end
-                  AND squad != 'unknown'
                 GROUP BY squad
             ),
             conversions AS (
@@ -779,7 +800,6 @@ def get_squad_checkout_summary(db: Session, period: str = "24h"):
                 ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
             FROM tb_daily_metrics_summary
             WHERE metric_date BETWEEN :date_start AND :date_end
-              AND squad != 'unknown'
             GROUP BY squad
             ORDER BY profit DESC
         """
@@ -864,8 +884,11 @@ def get_conversion_breakdown(
 
     normalized: list[dict[str, object]] = []
     for row in rows:
-        product_value = resolve_product(str(row.product or "unknown"))
-        if product and product_value != product:
+        product_raw = str(row.product or "").strip()
+        product_resolved = resolve_product(product_raw)
+        product_value = product_resolved if product_resolved != "unknown" else (product_raw or "UNKNOWN")
+
+        if product and str(product_value).upper() != str(product).upper():
             continue
 
         normalized.append(

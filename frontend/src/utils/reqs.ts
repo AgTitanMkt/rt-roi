@@ -5,21 +5,8 @@ const API_BASE =  "/api";
 
 console.log(`[API] Using base URL: ${API_BASE}`);
 
-export interface SquadOption {
-  value: string;
-  label: string;
-}
-
 export const DEFAULT_SQUAD = "all";
 
-export const SQUAD_OPTIONS: SquadOption[] = [
-  { value: DEFAULT_SQUAD, label: "Todos os squads" },
-  { value: "FBR", label: "Facebook" },
-  { value: "NTE", label: "Native - Erick" },
-  { value: "NTL", label: "Native - Luigi" },
-  { value: "YTD", label: "Youtube Fenix" },
-  { value: "YTS", label: "Youtube Shenlong" }
-];
 
 export interface MetricsData {
   cost: number;
@@ -150,12 +137,14 @@ export const fetchSummary = (
   squad?: string,
   period: string = "24h",
   checkout?: string,
-  product?: string
+  product?: string,
+  forceRefresh: boolean = false,
 ): Promise<SummaryResponse> => {
   let path = `/metrics/summary?period=${period}`;
   if (squad && squad !== DEFAULT_SQUAD) path += `&source=${squad}`;
   if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${checkout}`;
   if (product && product !== DEFAULT_SQUAD) path += `&product=${product}`;
+  if (forceRefresh) path += "&force_refresh=true";
   return fetchJson<SummaryResponse>(path);
 };
 

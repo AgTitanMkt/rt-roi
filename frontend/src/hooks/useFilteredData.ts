@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFilters } from "../context/useFilters";
 import type { Filters } from "../context/filterContextTypes";
 import {
@@ -10,6 +10,7 @@ import {
   fetchConversionBreakdown,
   checkBackendHealth,
 } from "../utils/reqs";
+import { normalizeSquadFilter } from "../utils/squadMapping";
 import type {
   SummaryResponse,
   HourlyMetric,
@@ -57,16 +58,18 @@ export const useFilteredData = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const requestIdRef = useRef(0);
 
   /**
    * Converte FilterContext.Filters para parâmetros de requisição
    * Mapeia squad para source (compatibilidade com backend)
    */
   const buildApiParams = useCallback((filters: Filters) => {
+    const normalizedSquad = normalizeSquadFilter(filters.squad);
     return {
       period: filters.period,
-      source: filters.squad, // Backend espera "source" em lugar de "squad"
-      squad: filters.squad,
+      source: normalizedSquad, // Backend espera "source" em lugar de "squad"
+      squad: normalizedSquad,
       checkout: filters.checkout,
       product: filters.product,
       offer: filters.offer,
@@ -80,94 +83,113 @@ export const useFilteredData = ({
   /**
    * Faz todas as requisições em paralelo
    */
-  const loadAllData = useCallback(async () => {
+  const loadAllData = useCallback(async (resetSummary = false) => {
+    const requestId = ++requestIdRef.current;
+
     setError(null);
     setIsLoading(true);
+    if (resetSummary) {
+      // Evita mostrar cards antigos enquanto os filtros novos carregam.
+      setSummary(null);
+    }
 
     try {
-      const healthy = await checkBackendHealth().catch(() => false);
-      setIsHealthy(healthy);
-
       const params = buildApiParams(filters);
-
-      // Fazer todas as requisições em paralelo
-      const [
-        summaryResult,
-        hourlyResult,
-        checkoutsResult,
-        productsResult,
-        squadsResult,
-        breakdownResult,
-      ] = await Promise.allSettled([
-        fetchSummary(params.source, params.period, params.checkout, params.product),
-        fetchHourly(params.source, params.period, params.checkout, params.product),
-        fetchCheckoutMetrics(params.source, params.period),
-        fetchProductMetrics(params.source, params.period),
-        fetchSquadMetrics(params.period),
-        fetchConversionBreakdown(params.period, params.squad, params.checkout, params.product),
-      ]);
 
       const errors: string[] = [];
 
-      // Processar resultados
-      if (summaryResult.status === "fulfilled") {
-        setSummary(summaryResult.value);
-      } else {
-        errors.push("Falha ao atualizar cards");
-        console.error("Summary error:", summaryResult.reason);
-      }
+      const healthPromise = checkBackendHealth()
+        .then((healthy) => {
+          if (requestId === requestIdRef.current) setIsHealthy(healthy);
+        })
+        .catch(() => {
+          if (requestId === requestIdRef.current) setIsHealthy(false);
+        });
 
-      if (hourlyResult.status === "fulfilled") {
-        setHourly(hourlyResult.value);
-      } else {
-        setHourly([]);
-        errors.push("Falha ao atualizar gráfico");
-        console.error("Hourly error:", hourlyResult.reason);
-      }
+      const summaryPromise = fetchSummary(
+        params.source,
+        params.period,
+        params.checkout,
+        params.product,
+        true,
+      )
+        .then((value) => {
+          if (requestId === requestIdRef.current) setSummary(value);
+        })
+        .catch((reason) => {
+          errors.push("Falha ao atualizar cards");
+          console.error("Summary error:", reason);
+        });
 
-      if (checkoutsResult.status === "fulfilled") {
-        setCheckouts(checkoutsResult.value);
-      } else {
-        setCheckouts([]);
-      }
+      const hourlyPromise = fetchHourly(params.source, params.period, params.checkout, params.product)
+        .then((value) => {
+          if (requestId === requestIdRef.current) setHourly(value);
+        })
+        .catch((reason) => {
+          if (requestId === requestIdRef.current) setHourly([]);
+          errors.push("Falha ao atualizar gráfico");
+          console.error("Hourly error:", reason);
+        });
 
-      if (productsResult.status === "fulfilled") {
-        setProducts(productsResult.value);
-      } else {
-        setProducts([]);
-      }
+      const checkoutsPromise = fetchCheckoutMetrics(params.source, params.period)
+        .then((value) => {
+          if (requestId === requestIdRef.current) setCheckouts(value);
+        })
+        .catch(() => {
+          if (requestId === requestIdRef.current) setCheckouts([]);
+        });
 
-      if (squadsResult.status === "fulfilled") {
-        setSquads(squadsResult.value);
-      } else {
-        setSquads([]);
-      }
+      const productsPromise = fetchProductMetrics(params.source, params.period)
+        .then((value) => {
+          if (requestId === requestIdRef.current) setProducts(value);
+        })
+        .catch(() => {
+          if (requestId === requestIdRef.current) setProducts([]);
+        });
 
-      if (breakdownResult.status === "fulfilled") {
-        setConversionBreakdown(breakdownResult.value);
-      } else {
-        setConversionBreakdown([]);
-      }
+      const squadsPromise = fetchSquadMetrics(params.period)
+        .then((value) => {
+          if (requestId === requestIdRef.current) setSquads(value);
+        })
+        .catch(() => {
+          if (requestId === requestIdRef.current) setSquads([]);
+        });
+
+      const breakdownPromise = fetchConversionBreakdown(params.period, params.squad, params.checkout, params.product)
+        .then((value) => {
+          if (requestId === requestIdRef.current) setConversionBreakdown(value);
+        })
+        .catch(() => {
+          if (requestId === requestIdRef.current) setConversionBreakdown([]);
+        });
+
+      await Promise.all([
+        healthPromise,
+        summaryPromise,
+        hourlyPromise,
+        checkoutsPromise,
+        productsPromise,
+        squadsPromise,
+        breakdownPromise,
+      ]);
 
       if (errors.length > 0) {
-        setError(errors.join(" | "));
+        if (requestId === requestIdRef.current) setError(errors.join(" | "));
       }
 
-      if (summaryResult.status === "fulfilled" || hourlyResult.status === "fulfilled") {
-        setLastUpdated(Date.now());
-      }
+      if (requestId === requestIdRef.current) setLastUpdated(Date.now());
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erro desconhecido";
-      setError(message);
+      if (requestId === requestIdRef.current) setError(message);
       console.error("useFilteredData error:", err);
     } finally {
-      setIsLoading(false);
+      if (requestId === requestIdRef.current) setIsLoading(false);
     }
   }, [filters, buildApiParams]);
 
   // Recarregar dados quando filtros mudam
   useEffect(() => {
-    void loadAllData();
+    void loadAllData(true);
   }, [filters, loadAllData]);
 
   // Auto-refresh periodicamente

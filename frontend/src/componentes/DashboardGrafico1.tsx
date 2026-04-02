@@ -287,7 +287,7 @@ const DashboardGrafico = ({
                     : Number(value ?? 0);
 
                   if (key === "relacao") {
-                    return [`${(numericValue * 100).toFixed(2)}%`, "ROI"];
+                    return [numericValue.toFixed(4), "ROI"];
                   }
 
                   if (key === "gasto") {
@@ -346,7 +346,7 @@ const DashboardGrafico = ({
                 dataKey="relacao"
                 stroke="#22c55e"
                 dot={({ cx, cy, payload }) => {
-                  const isNegative = Number(payload?.relacao ?? 0) < 1;
+                  const isNegative = Number(payload?.relacao ?? 0) < 0;
 
                   return (
                     <circle

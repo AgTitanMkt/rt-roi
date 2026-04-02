@@ -54,14 +54,24 @@ def extract_campaign_info(campaign_name: str, campaign_id: str = "", offer_id: s
         info.platform = parts[0].upper()
     
     # Squad/checkout são resolvidos no texto completo para não depender da ordem dos campos.
-    info.squad = resolve_squad(campaign_name)
-    info.checkout = resolve_checkout(campaign_name)
+    # Se não houver match no mapping, preservamos o valor bruto da nomenclatura.
+    squad_resolved = resolve_squad(campaign_name)
+    checkout_resolved = resolve_checkout(campaign_name)
+
+    raw_squad = parts[1].strip() if len(parts) > 1 else ""
+    raw_checkout = parts[2].strip() if len(parts) > 2 else ""
+
+    info.squad = squad_resolved if squad_resolved != "unknown" else (raw_squad or "unknown")
+    info.checkout = checkout_resolved if checkout_resolved != "unknown" else (raw_checkout or "unknown")
 
     if len(parts) > 3:
         info.niche = parts[3].strip().upper()
     
     # Produto também é resolvido no texto completo para padronizar aliases.
-    info.product = resolve_product(campaign_name)
+    # Sem match, usamos o valor bruto da parte esperada da campanha.
+    product_resolved = resolve_product(campaign_name)
+    raw_product = parts[4].strip() if len(parts) > 4 else ""
+    info.product = product_resolved if product_resolved != "unknown" else (raw_product or "unknown")
 
     return info
 

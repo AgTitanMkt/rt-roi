@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import type { Filters, FilterContextType } from "./filterContextTypes";
 import { FilterContext } from "./filterContextObject";
+import { normalizeSquadFilter } from "../utils/squadMapping";
 
 /**
  * FilterProvider: Provider para o contexto de filtros
@@ -25,7 +26,7 @@ export const FilterProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const params = new URLSearchParams(window.location.search);
     return {
       period: (params.get("period") as Filters["period"]) || DEFAULT_FILTERS.period,
-      squad: params.get("squad") || undefined,
+      squad: normalizeSquadFilter(params.get("squad") || undefined),
       checkout: params.get("checkout") || undefined,
       product: params.get("product") || undefined,
       offer: params.get("offer") || undefined,
@@ -53,9 +54,10 @@ export const FilterProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const updateFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
+    const nextValue = key === "squad" ? normalizeSquadFilter(value as string | undefined) : value;
     setFiltersState((prev) => ({
       ...prev,
-      [key]: value,
+      [key]: nextValue,
     }));
   }, []);
 

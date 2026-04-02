@@ -76,3 +76,4 @@ PRODUCT_MAPPINGS = [
 
   { "value": "prostate_max", "aliases": ["prostate max", "prostatemax"] }
 ]
+

@@ -10,6 +10,7 @@ from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSu
 from ..metrics_service import get_summary as get_summary_metrics
 from .conversions import AggregatedConversions, extract_campaign_info
 from .http_client import make_request_with_retry
+from .mappings import resolve_squad, resolve_checkout, resolve_product
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def _normalize_and_format(raw_value: str | None, normalized_value: str | None) -
     if not normalized_value or normalized_value.upper() == "UNKNOWN":
         raw_str = str(raw_value or "").strip() if raw_value else ""
         if raw_str and raw_str.upper() != "UNKNOWN":
-            return f"UNKNOWN ({raw_str.upper()})"
+            return raw_str.upper()
         return "UNKNOWN"
 
     return normalized_value.strip().upper()
@@ -107,22 +108,23 @@ def persist_daily_summary_snapshot(
         source_candidates = [value.strip() for value in (campaign_name, offer_name) if str(value or "").strip()]
         source_name = " | ".join(source_candidates)
         squad_raw = _extract_squad_from_campaign_name(source_name)
+        squad_resolved = resolve_squad(source_name or squad_raw)
         # Normalizar squad para UPPERCASE e adicionar valor original se desconhecido
-        squad = _normalize_and_format(squad_raw, squad_raw)
+        squad = _normalize_and_format(squad_raw, squad_resolved)
 
         if squad not in by_squad:
             by_squad[squad] = {
-                "cost": _q2(float(row.get("cost", 0) or 0)),
-                "profit": _q2(float(row.get("profit", 0) or 0)),
-                "revenue": _q2(float(row.get("revenue", 0) or 0)),
+                "cost": Decimal("0"),
+                "profit": Decimal("0"),
+                "revenue": Decimal("0"),
                 "initiate": int(0),
                 "purchase": int(0),
             }
-        else:
-            # Substituir valores, não adicionar
-            by_squad[squad]["cost"] = _q2(float(row.get("cost", 0) or 0))
-            by_squad[squad]["profit"] = _q2(float(row.get("profit", 0) or 0))
-            by_squad[squad]["revenue"] = _q2(float(row.get("revenue", 0) or 0))
+
+        # Snapshot diário precisa representar o total do dia por squad.
+        by_squad[squad]["cost"] = _q2(by_squad[squad]["cost"] + _q2(float(row.get("cost", 0) or 0)))
+        by_squad[squad]["profit"] = _q2(by_squad[squad]["profit"] + _q2(float(row.get("profit", 0) or 0)))
+        by_squad[squad]["revenue"] = _q2(by_squad[squad]["revenue"] + _q2(float(row.get("revenue", 0) or 0)))
 
         campaign_id = str(row.get("campaign_id") or row.get("campaignId") or row.get("campaign") or "").strip()
         offer_id = str(row.get("offer_id") or row.get("offerId") or row.get("offer") or "").strip()
@@ -145,6 +147,13 @@ def persist_daily_summary_snapshot(
 
     db = SessionLocal()
     try:
+        # Snapshot diario deve substituir totalmente o estado da data,
+        # evitando linhas legadas que inflavam totais.
+        db.query(DailySummary).filter(DailySummary.metric_date == metric_date).delete(synchronize_session=False)
+        db.query(DailyCheckoutSummary).filter(DailyCheckoutSummary.metric_date == metric_date).delete(synchronize_session=False)
+        db.query(DailyProductSummary).filter(DailyProductSummary.metric_date == metric_date).delete(synchronize_session=False)
+        db.query(DailyConversionEntity).filter(DailyConversionEntity.metric_date == metric_date).delete(synchronize_session=False)
+
         # Persistir sumário por squad
         for squad, agg in by_squad.items():
             cost = _q2(agg["cost"])
@@ -275,9 +284,6 @@ def _persist_checkout_summary(
     
     # Geral por checkout
     for checkout, metrics in conversions.by_checkout.items():
-        if checkout == "unknown":
-            continue
-
         # Normalizar checkout para UPPERCASE e adicionar valor original se desconhecido
         checkout_normalized = _normalize_and_format(checkout, checkout)
         conversion_rate = _q2(metrics.conversion_rate)
@@ -323,10 +329,18 @@ def _persist_conversion_breakdown(
         if not info:
             continue
 
-        # Normalizar valores para UPPERCASE e adicionar valores originais se desconhecidos
-        squad = _normalize_and_format(info.squad, info.squad)
-        checkout = _normalize_and_format(info.checkout, info.checkout)
-        product = _normalize_and_format(info.product, info.product)
+        mapping_source = " | ".join(
+            [
+                value.strip()
+                for value in (info.campaign_name, info.squad, info.checkout, info.product)
+                if str(value or "").strip()
+            ]
+        )
+
+        # Re-resolve via settings antes de persistir para evitar dados fora do padrão.
+        squad = _normalize_and_format(info.squad, resolve_squad(mapping_source or info.squad))
+        checkout = _normalize_and_format(info.checkout, resolve_checkout(mapping_source or info.checkout))
+        product = _normalize_and_format(info.product, resolve_product(mapping_source or info.product))
 
         existing = db.query(DailyConversionEntity).filter(
             DailyConversionEntity.metric_date == metric_date,
@@ -373,8 +387,6 @@ def _persist_product_summary(
     """Persiste dados de conversão por produto."""
     
     for product, metrics in conversions.by_product.items():
-        if product == "unknown":
-            continue
 
         # Normalizar product para UPPERCASE e adicionar valor original se desconhecido
         product_normalized = _normalize_and_format(product, product)

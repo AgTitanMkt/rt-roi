@@ -83,6 +83,10 @@ def get_summary(
             default=None,
             description="Filtro opcional de produto",
         ),
+        force_refresh: bool = Query(
+            default=False,
+            description="Quando true, ignora cache e recalcula o summary atualizado",
+        ),
         db: Session = Depends(get_db)
 ):
     # Normalizar filtros usando FilterService
@@ -94,6 +98,7 @@ def get_summary(
         filters.period,
         checkout=filters.checkout,
         product=filters.product,
+        force_refresh=force_refresh,
     )
 
     if not isinstance(result, dict) or "today" not in result:
