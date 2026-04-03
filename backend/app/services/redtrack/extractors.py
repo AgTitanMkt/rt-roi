@@ -132,30 +132,31 @@ def get_conversion_type(row: dict) -> Optional[str]:
     Valida contra tipos conhecidos (purchase, initiatecheckout).
     Retorna None se tipo não for reconhecido após tentativas de normalização.
     """
-    raw_type = extract_nested_field(
-        row,
-        "type",
-        "event_type",
-        "conversion_type",
-        "conversionType",
-        "goal",
-        "event",
-        default=""
-    ).lower()
-    
-    if not raw_type:
+    # Usa apenas campos canônicos para evitar falsos positivos em type1..type40.
+    candidates: list[str] = []
+    for key in ("type", "event", "goal", "conversion_type", "conversionType", "event_type"):
+        value = row.get(key)
+        if value is None:
+            continue
+        normalized = str(value).strip().lower()
+        if normalized:
+            candidates.append(normalized)
+
+    if not candidates:
         return None
-    
-    VALID_TYPES = {"purchase", "initiatecheckout"}
-    if raw_type in VALID_TYPES:
-        return raw_type
-    
-    # Tentar normalizar variações
-    if "purchase" in raw_type:
-        return "purchase"
-    if "initiate" in raw_type and "checkout" in raw_type:
-        return "initiatecheckout"
-    
+
+    for raw_type in candidates:
+        if raw_type == "purchase":
+            return "purchase"
+        if raw_type == "initiatecheckout":
+            return "initiatecheckout"
+
+        # Tentar normalizar variacoes comuns.
+        if "purchase" in raw_type:
+            return "purchase"
+        if "initiate" in raw_type and "checkout" in raw_type:
+            return "initiatecheckout"
+
     return None
 
 

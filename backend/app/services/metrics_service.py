@@ -864,8 +864,28 @@ def get_conversion_breakdown(
         date_start = sp_today - timedelta(days=29)
         date_end = sp_today
     else:  # 24h ou daily
-        date_start = sp_today
-        date_end = sp_today
+        latest_query = """
+            SELECT MAX(metric_date) AS latest_date
+            FROM tb_daily_conversion_entities
+            WHERE metric_date <= :today
+              AND (:squad IS NULL OR UPPER(squad) = UPPER(:squad))
+              AND (:checkout IS NULL OR UPPER(checkout) = UPPER(:checkout))
+              AND (:product IS NULL OR UPPER(product) = UPPER(:product))
+        """
+        latest_row = db.execute(
+            text(latest_query),
+            {
+                "today": sp_today,
+                "squad": squad,
+                "checkout": checkout,
+                "product": product,
+            },
+        ).fetchone()
+        latest_date = getattr(latest_row, "latest_date", None) if latest_row else None
+
+        reference_date = latest_date if isinstance(latest_date, date) else sp_today
+        date_start = reference_date
+        date_end = reference_date
 
     logger.info(f"🔍 Buscando conversion breakdown: period={period}, squad={squad}, checkout={checkout}, product={product}")
     logger.info(f"   Data range: {date_start} a {date_end}")

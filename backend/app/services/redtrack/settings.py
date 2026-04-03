@@ -15,6 +15,10 @@ INITIAL_BACKOFF = 1
 MAX_BACKOFF = 60
 RATE_LIMIT_DELAY = 0.5
 
+# Conversões: limitar paginação para evitar estouro de rate limit.
+REDTRACK_CONVERSIONS_PER_PAGE = int(os.getenv("REDTRACK_CONVERSIONS_PER_PAGE", "1000"))
+REDTRACK_CONVERSIONS_MAX_PAGES = int(os.getenv("REDTRACK_CONVERSIONS_MAX_PAGES", "15"))
+
 UNKNOWN_DIMENSION = "unknown"
 
 # Estruturas orientadas a aliases: adicione novos valores apenas aqui.

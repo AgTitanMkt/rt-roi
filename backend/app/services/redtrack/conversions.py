@@ -19,6 +19,8 @@ from .settings import (
     REDTRACK_API_KEY,
     REDTRACK_CONVERSIONS_URL,
     REDTRACK_REPORT_URL,
+    REDTRACK_CONVERSIONS_PER_PAGE,
+    REDTRACK_CONVERSIONS_MAX_PAGES,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,19 +98,18 @@ async def _fetch_conversions_page(
     date_from: str,
     date_to: str,
     page: int = 1,
-    per_page: int = 1000,
+    per_page: int = REDTRACK_CONVERSIONS_PER_PAGE,
 ) -> list[dict]:
     """Busca uma página de conversões da API."""
     params = {
         "api_key": REDTRACK_API_KEY,
         "date_from": date_from,
         "date_to": date_to,
-        "time_interval": "lasthour",
         "timezone": "America/Sao_Paulo",
         "per": per_page,
         "page": page,
     }
-    
+
     rows = await make_request_with_retry(
         client, 
         REDTRACK_CONVERSIONS_URL, 
@@ -139,11 +140,12 @@ async def _fetch_report_event_rows(
 ) -> list[dict]:
     params = {
         "api_key": REDTRACK_API_KEY,
+        "group": "campaign",
         "date_from": date_from,
         "date_to": date_to,
         "type": event_type,
         "timezone": "America/Sao_Paulo",
-        "per": 1000,
+        "per": 500,
         "page": 1,
     }
 
@@ -174,36 +176,36 @@ async def _fallback_fetch_all_conversions_via_report(
     campaign_info_cache: dict[str, CampaignInfo] = {}
 
     for event_type, is_purchase in (("InitiateCheckout", False), ("Purchase", True)):
-         rows = await _fetch_report_event_rows(
-             client,
-             event_type=event_type,
-             date_from=date_from,
-             date_to=date_to,
-         )
+        rows = await _fetch_report_event_rows(
+            client,
+            event_type=event_type,
+            date_from=date_from,
+            date_to=date_to,
+        )
 
-         for row in rows:
-             campaign_id = get_campaign_id(row)
-             if not campaign_id:
-                 continue
+        for row in rows:
+            campaign_id = get_campaign_id(row)
+            if not campaign_id:
+                continue
 
-             campaign_name = get_campaign_name(row)
-             offer_name = get_offer_name(row)
-             mapping_source = build_mapping_source_text(campaign_name, offer_name)
-             offer_id = get_offer_id(row)
-             count = get_event_count(row)
+            campaign_name = get_campaign_name(row)
+            offer_name = get_offer_name(row)
+            mapping_source = build_mapping_source_text(campaign_name, offer_name)
+            offer_id = get_offer_id(row)
+            count = get_event_count(row)
 
-             if campaign_id not in campaign_info_cache:
-                 campaign_info_cache[campaign_id] = extract_campaign_info(
-                     mapping_source or campaign_name, campaign_id, offer_id,
-                 )
+            if campaign_id not in campaign_info_cache:
+                campaign_info_cache[campaign_id] = extract_campaign_info(
+                    mapping_source or campaign_name, campaign_id, offer_id,
+                )
 
-             info = campaign_info_cache[campaign_id]
-             result.campaign_info[campaign_id] = info
+            info = campaign_info_cache[campaign_id]
+            result.campaign_info[campaign_id] = info
 
-             aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
-             aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
-             aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
-             aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
+            aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
+            aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
+            aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
+            aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
 
     return result
 
@@ -226,19 +228,18 @@ async def fetch_all_conversions(
     
     result = AggregatedConversions()
     campaign_info_cache: dict[str, CampaignInfo] = {}
-    
-    page = 1
     total_rows = 0
     filtered_rows = 0
-    
-    while True:
+
+    page = 1
+    while page <= REDTRACK_CONVERSIONS_MAX_PAGES:
         rows = await _fetch_conversions_page(
             client,
             date_from=date_from,
             date_to=date_to,
             page=page,
         )
-        
+
         if not rows:
             break
 
@@ -246,50 +247,45 @@ async def fetch_all_conversions(
             logger.info("🔎 Campos recebidos em conversões (amostra): %s", sorted(rows[0].keys()))
 
         total_rows += len(rows)
-        
+
         for row in rows:
-             # Validar tipo de conversão
-             conv_type = get_conversion_type(row)
-             if conv_type is None:
-                 # Ignorar tipos que não são Purchase ou InitiateCheckout
-                 logger.debug("Ignorando tipo de conversão: %s", row.get("type"))
-                 continue
+            conv_type = get_conversion_type(row)
+            if conv_type is None:
+                # Ignora qualquer tipo que nao seja Purchase/InitiateCheckout.
+                continue
 
-             filtered_rows += 1
+            filtered_rows += 1
+            campaign_id = get_campaign_id(row)
+            if not campaign_id:
+                continue
 
-             campaign_id = get_campaign_id(row)
-             if not campaign_id:
-                 continue
+            campaign_name = get_campaign_name(row)
+            offer_name = get_offer_name(row)
+            mapping_source = build_mapping_source_text(campaign_name, offer_name)
+            offer_id = get_offer_id(row)
+            # /conversions retorna eventos brutos; cada linha equivale a 1 evento.
+            count = 1
 
-             campaign_name = get_campaign_name(row)
-             offer_name = get_offer_name(row)
-             mapping_source = build_mapping_source_text(campaign_name, offer_name)
-             offer_id = get_offer_id(row)
-             count = get_event_count(row)
+            if campaign_id not in campaign_info_cache:
+                campaign_info_cache[campaign_id] = extract_campaign_info(
+                    mapping_source or campaign_name, campaign_id, offer_id,
+                )
 
-             # Extrair informações da campanha (usar cache para performance)
-             if campaign_id not in campaign_info_cache:
-                 campaign_info_cache[campaign_id] = extract_campaign_info(
-                     mapping_source or campaign_name, campaign_id, offer_id,
-                 )
+            info = campaign_info_cache[campaign_id]
+            result.campaign_info[campaign_id] = info
 
-             info = campaign_info_cache[campaign_id]
-             result.campaign_info[campaign_id] = info
-
-             is_purchase = conv_type == "purchase"
-
-             aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
-             aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
-             aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
-             aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
+            is_purchase = conv_type == "purchase"
+            aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
+            aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
+            aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
+            aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
 
         logger.debug("Página %s: %s linhas, %s filtradas", page, len(rows), filtered_rows)
-        
-        if len(rows) < 1000:
+        if len(rows) < REDTRACK_CONVERSIONS_PER_PAGE:
             break
-        
         page += 1
-    
+
+
     logger.info(
         "✅ Conversões processadas: %s total, %s filtradas (Purchase/InitiateCheckout)",
         total_rows,
