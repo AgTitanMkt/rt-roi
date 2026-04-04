@@ -20,6 +20,24 @@ def _product_token(value: str | None) -> str:
     return normalize_mapping_token(value)
 
 
+def _roi_percent(value) -> Decimal:
+    raw = Decimal(str(value or 0))
+    # Alguns fluxos antigos já salvam ROI em percentual (ex.: 25.6),
+    # enquanto os novos gravam como razão (ex.: 0.256).
+    # Normalizamos apenas quando ainda está em razão.
+    if abs(raw) <= Decimal("1.5"):
+        return _q2(raw * 100)
+    return _q2(raw)
+
+
+def _roi_percent_from_cost_profit(cost, profit) -> Decimal:
+    cost_decimal = Decimal(str(cost or 0))
+    profit_decimal = Decimal(str(profit or 0))
+    if cost_decimal <= 0:
+        return _q2(0)
+    return _q2((profit_decimal / cost_decimal) * 100)
+
+
 def _q2(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -439,14 +457,14 @@ def get_summary(
             "profit": _q2(getattr(current_data, "profit", 0) or 0),
             "revenue": _q2(getattr(current_data, "revenue", 0) or 0),
             "checkout": current_checkout if current_checkout is not None else _q2(getattr(current_data, "checkout_avg", 0) or 0),
-            "roi": _q4(getattr(current_data, "roi", 0) or 0) * 100,
+            "roi": _roi_percent_from_cost_profit(getattr(current_data, "cost", 0) or 0, getattr(current_data, "profit", 0) or 0),
         },
         "yesterday": {
             "cost": _q2(getattr(previous_data, "cost", 0) or 0),
             "profit": _q2(getattr(previous_data, "profit", 0) or 0),
             "revenue": _q2(getattr(previous_data, "revenue", 0) or 0),
             "checkout": previous_checkout if previous_checkout is not None else _q2(getattr(previous_data, "checkout_avg", 0) or 0),
-            "roi": _q4(getattr(previous_data, "roi", 0) or 0) * 100,
+            "roi": _roi_percent_from_cost_profit(getattr(previous_data, "cost", 0) or 0, getattr(previous_data, "profit", 0) or 0),
         },
         "comparison": {
             "cost_change": 0,
@@ -461,13 +479,13 @@ def get_summary(
     current_profit = float(getattr(current_data, "profit", 0) or 0)
     current_revenue = float(getattr(current_data, "revenue", 0) or 0)
     current_checkout = float(result_obj["today"]["checkout"] or 0)
-    current_roi = float(getattr(current_data, "roi", 0) or 0)
+    current_roi = float(result_obj["today"]["roi"] or 0)
 
     previous_cost = float(getattr(previous_data, "cost", 0) or 0)
     previous_profit = float(getattr(previous_data, "profit", 0) or 0)
     previous_revenue = float(getattr(previous_data, "revenue", 0) or 0)
     previous_checkout = float(result_obj["yesterday"]["checkout"] or 0)
-    previous_roi = float(getattr(previous_data, "roi", 0) or 0)
+    previous_roi = float(result_obj["yesterday"]["roi"] or 0)
 
     if previous_cost != 0:
         result_obj["comparison"]["cost_change"] = _q2(((current_cost - previous_cost) / abs(previous_cost)) * 100)

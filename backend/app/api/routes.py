@@ -112,14 +112,14 @@ def get_summary(
             "profit": float((result.get("today") or {}).get("profit") or 0),
             "revenue": float((result.get("today") or {}).get("revenue") or 0),
             "checkout": float((result.get("today") or {}).get("checkout") or 0),
-            "roi": float((result.get("today") or {}).get("roi") or 0) * 100,
+            "roi": float((result.get("today") or {}).get("roi") or 0),
         },
         "yesterday": {
             "cost": float((result.get("yesterday") or {}).get("cost") or 0),
             "profit": float((result.get("yesterday") or {}).get("profit") or 0),
             "revenue": float((result.get("yesterday") or {}).get("revenue") or 0),
             "checkout": float((result.get("yesterday") or {}).get("checkout") or 0),
-            "roi": float((result.get("yesterday") or {}).get("roi") or 0) * 100,
+            "roi": float((result.get("yesterday") or {}).get("roi") or 0),
         },
         "comparison": {
             "cost_change": float((result.get("comparison") or {}).get("cost_change") or 0),
