@@ -70,12 +70,30 @@ async def fetch_daily_summary_rows(
 
     rows_acc: list[dict] = []
     while True:
-        rows = await make_request_with_retry(client, REDTRACK_REPORT_URL, params)
+        current_page = int(params.get("page", 1) or 1)
+        logger.info("📄 [daily_summary] Buscando página %s para %s", current_page, target_date)
+        try:
+            rows = await make_request_with_retry(client, REDTRACK_REPORT_URL, params)
+        except Exception as exc:
+            logger.error(
+                "❌ [daily_summary] Falha na página %s para %s: %s",
+                current_page,
+                target_date,
+                exc,
+            )
+            raise
+
         if not isinstance(rows, list):
             raise RuntimeError("Resposta inesperada da API Redtrack para summary diario.")
 
         rows_acc.extend(rows)
+        logger.info(
+            "✅ [daily_summary] Página %s concluída (%s linhas)",
+            current_page,
+            len(rows),
+        )
         if len(rows) < params["per"]:
+            logger.info("✅ [daily_summary] Fim da paginação em %s (página %s)", target_date, current_page)
             break
         params["page"] += 1
 

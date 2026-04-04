@@ -13,18 +13,18 @@ async def make_request_with_retry(
     url: str,
     params: dict,
     delay_after: float = RATE_LIMIT_DELAY,
-) -> dict:
+) -> object:
     backoff = INITIAL_BACKOFF
     last_error = None
-    campaign_id = params.get("campaign_id", "N/A")
+    endpoint = url.rstrip("/").split("/")[-1] or "unknown"
     page = params.get("page", 1)
     event_type = params.get("type", "N/A")
 
     for attempt in range(MAX_RETRIES):
         try:
             logger.debug(
-                "📤 Requisição: campaign_id=%s, page=%s, type=%s, attempt=%s/%s",
-                campaign_id,
+                "📤 Request %s | page=%s type=%s attempt=%s/%s",
+                endpoint,
                 page,
                 event_type,
                 attempt + 1,
@@ -35,9 +35,24 @@ async def make_request_with_retry(
             if res.status_code == 429:
                 wait_time = min(backoff, MAX_BACKOFF)
                 logger.warning(
-                    "⚠️  Rate limited (429)! campaign_id=%s, page=%s. Tentativa %s/%s. "
+                    "⚠️ Rate limited (429) em %s page=%s. Tentativa %s/%s. "
                     "Aguardando %ss antes de retry...",
-                    campaign_id,
+                    endpoint,
+                    page,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    wait_time,
+                )
+                await asyncio.sleep(wait_time)
+                backoff *= 2
+                continue
+
+            if res.status_code == 409:
+                wait_time = min(backoff, MAX_BACKOFF)
+                logger.warning(
+                    "⚠️ Conflito (409) em %s page=%s. Tentativa %s/%s. "
+                    "Aguardando %ss antes de retry...",
+                    endpoint,
                     page,
                     attempt + 1,
                     MAX_RETRIES,
@@ -50,13 +65,7 @@ async def make_request_with_retry(
             res.raise_for_status()
             payload = res.json()
             count = len(payload) if isinstance(payload, list) else 1
-            logger.info(
-                "✅ Requisição bem-sucedida: campaign_id=%s, page=%s, type=%s, linhas=%s",
-                campaign_id,
-                page,
-                event_type,
-                count,
-            )
+            logger.debug("✅ Response %s | page=%s linhas=%s", endpoint, page, count)
 
             if delay_after > 0:
                 await asyncio.sleep(delay_after)
@@ -75,8 +84,19 @@ async def make_request_with_retry(
                 )
                 await asyncio.sleep(wait_time)
                 backoff *= 2
+            elif exc.response.status_code == 409:
+                wait_time = min(backoff, MAX_BACKOFF)
+                logger.warning(
+                    "⚠️ Conflito (409) em tentativa %s/%s (%s). Aguardando %ss...",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    endpoint,
+                    wait_time,
+                )
+                await asyncio.sleep(wait_time)
+                backoff *= 2
             else:
-                logger.error("❌ Erro HTTP %s: %s", exc.response.status_code, exc)
+                logger.error("❌ Erro HTTP %s em %s: %s", exc.response.status_code, endpoint, exc)
                 raise
         except Exception as exc:
             last_error = exc

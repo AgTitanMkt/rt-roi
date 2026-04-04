@@ -287,7 +287,7 @@ const DashboardGrafico = ({
                     : Number(value ?? 0);
 
                   if (key === "relacao") {
-                    return [numericValue.toFixed(4), "ROI"];
+                    return [`${numericValue.toFixed(2)}%`, "ROI"];
                   }
 
                   if (key === "gasto") {

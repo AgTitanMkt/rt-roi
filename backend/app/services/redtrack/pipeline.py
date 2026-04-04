@@ -7,6 +7,7 @@ from ..redis_service import invalidate_metrics_cache
 from ...schemas.redtrack_schema import RedtrackReportItem, RedtrackResponse
 from .conversions import (
     fetch_all_conversions,
+    fetch_conversion_rows,
     get_conversion_rates_by_campaign,
     extract_campaign_info,
     AggregatedConversions,
@@ -48,11 +49,13 @@ async def redtrack_reports() -> RedtrackResponse:
     now_sp = datetime.now(SAO_PAULO_TZ)
     last_closed_hour = now_sp.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     date_from = last_closed_hour.strftime("%Y-%m-%d")
-    date_to = now_sp.strftime("%Y-%m-%d")
+    date_to = last_closed_hour.strftime("%Y-%m-%d")
+    hour_end = last_closed_hour + timedelta(hours=1)
 
     logger.info("⏰ Horário atual (São Paulo): %s", now_sp.strftime('%Y-%m-%d %H:%M:%S %Z'))
     logger.info("⏰ Hora fechada anterior: %s", last_closed_hour.strftime('%Y-%m-%d %H:%M:%S %Z'))
-    logger.info("📅 Período de busca: %s a %s", date_from, date_to)
+    logger.info("📅 Período de busca (hourly): %s a %s", date_from, date_to)
+    logger.info("🕐 Janela de conversão por hora: %s até %s", last_closed_hour.isoformat(), hour_end.isoformat())
 
     if not REDTRACK_API_KEY:
         raise RuntimeError("REDTRACK_API_KEY nao encontrada. Defina no .env antes de executar.")
@@ -157,28 +160,28 @@ async def redtrack_reports() -> RedtrackResponse:
 
         logger.info("")
         logger.info("📌 ETAPA 2: Buscando conversões em requisição separada...")
-        logger.info("   🧮 Fórmula aplicada: (purchase / checkout) * 100")
         conversions: dict[str, float] = {}
-        events_by_campaign: dict[str, dict[str, int]] = {}
-        aggregated_conversions: AggregatedConversions | None = None
-        
+        aggregated_conversions = AggregatedConversions()
+        prefetched_conversion_rows_by_day: dict[str, list[dict]] = {}
+
         try:
-            # Usar nova função que filtra apenas Purchase e InitiateCheckout
-            aggregated_conversions = await fetch_all_conversions(
-                client, 
-                date_from=date_from, 
-                date_to=date_to
+            # Busca uma vez o dia atual e reaproveita em hourly + snapshot diário.
+            prefetched_conversion_rows = await fetch_conversion_rows(
+                client,
+                date_from=date_from,
+                date_to=date_to,
             )
-            
-            # Converter para formato legado para compatibilidade
-            events_by_campaign = {
-                campaign_id: {
-                    "InitiateCheckout": metrics.initiate_checkout,
-                    "Purchase": metrics.purchase,
-                }
-                for campaign_id, metrics in aggregated_conversions.by_campaign.items()
-            }
-            
+            prefetched_conversion_rows_by_day[date_from] = prefetched_conversion_rows
+
+            aggregated_conversions = await fetch_all_conversions(
+                client,
+                date_from=date_from,
+                date_to=date_to,
+                hour_start=last_closed_hour,
+                hour_end=hour_end,
+                prefetched_rows=prefetched_conversion_rows,
+            )
+
             conversions = get_conversion_rates_by_campaign(aggregated_conversions)
             logger.info("✅ %s campanhas com conversão calculada", len(conversions))
 
@@ -193,14 +196,10 @@ async def redtrack_reports() -> RedtrackResponse:
             )
 
         if conversions:
-            offer_by_campaign_id = (
-                {
-                    campaign_id: info.offer_id
-                    for campaign_id, info in (aggregated_conversions.campaign_info.items() if aggregated_conversions else [])
-                }
-                if aggregated_conversions
-                else {}
-            )
+            offer_by_campaign_id = {
+                campaign_id: info.offer_id
+                for campaign_id, info in aggregated_conversions.campaign_info.items()
+            }
             data = [
                 item.model_copy(
                     update={
@@ -238,23 +237,29 @@ async def redtrack_reports() -> RedtrackResponse:
                 target_day = target_date.strftime("%Y-%m-%d")
                 summary_rows = await fetch_daily_summary_rows(client, target_date=target_day)
 
-                if target_date == today_date:
-                    target_events = events_by_campaign
-                    target_conversions = aggregated_conversions
+                # Snapshot diário sempre usa conversões do dia inteiro para manter
+                # cards/relatórios consistentes no frontend.
+                prefetched_rows = prefetched_conversion_rows_by_day.get(target_day)
+                if prefetched_rows is not None:
+                    target_conversions = await fetch_all_conversions(
+                        client,
+                        date_from=target_day,
+                        date_to=target_day,
+                        prefetched_rows=prefetched_rows,
+                    )
                 else:
-                    # Buscar conversões do dia anterior
                     target_conversions = await fetch_all_conversions(
                         client,
                         date_from=target_day,
                         date_to=target_day,
                     )
-                    target_events = {
-                        campaign_id: {
-                            "InitiateCheckout": metrics.initiate_checkout,
-                            "Purchase": metrics.purchase,
-                        }
-                        for campaign_id, metrics in target_conversions.by_campaign.items()
+                target_events = {
+                    campaign_id: {
+                        "InitiateCheckout": metrics.initiate_checkout,
+                        "Purchase": metrics.purchase,
                     }
+                    for campaign_id, metrics in target_conversions.by_campaign.items()
+                }
 
                 persist_daily_summary_snapshot(
                     summary_rows, 

@@ -21,7 +21,7 @@ class ConversionMetrics:
 
 @dataclass
 class CampaignInfo:
-    """Informações extraídas da nomenclatura da campanha."""
+    """Informações extraídas da nomenclatura da campanha e do offer relacionado."""
     campaign_id: str
     campaign_name: str
     offer_id: str | None = None
@@ -30,6 +30,9 @@ class CampaignInfo:
     product: str = "unknown"   # ErosLift, etc.
     niche: str = "unknown"     # ED, etc.
     platform: str = "unknown"  # FB, etc.
+    kit_1: str = "unknown"
+    kit_2: str = "unknown"
+    kit_3: str = "unknown"
 
 
 @dataclass

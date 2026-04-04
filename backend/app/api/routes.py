@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Path
 from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
@@ -9,6 +9,7 @@ from ..schemas.metrics_schema import (
     ProductSummaryItem,
     SquadSummaryItem,
     ConversionBreakdownItem,
+    OfferResponse,
 )
 from ..services.redis_service import get_summary_cached, get_hourly_cached
 from ..services.metrics_service import (
@@ -18,6 +19,7 @@ from ..services.metrics_service import (
     get_squad_checkout_summary,
     get_conversion_breakdown,
 )
+from ..services.offer_service import sync_fetch_offer_data
 from ..services.filter_service import FilterService
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
@@ -110,14 +112,14 @@ def get_summary(
             "profit": float((result.get("today") or {}).get("profit") or 0),
             "revenue": float((result.get("today") or {}).get("revenue") or 0),
             "checkout": float((result.get("today") or {}).get("checkout") or 0),
-            "roi": float((result.get("today") or {}).get("roi") or 0),
+            "roi": float((result.get("today") or {}).get("roi") or 0) * 100,
         },
         "yesterday": {
             "cost": float((result.get("yesterday") or {}).get("cost") or 0),
             "profit": float((result.get("yesterday") or {}).get("profit") or 0),
             "revenue": float((result.get("yesterday") or {}).get("revenue") or 0),
             "checkout": float((result.get("yesterday") or {}).get("checkout") or 0),
-            "roi": float((result.get("yesterday") or {}).get("roi") or 0),
+            "roi": float((result.get("yesterday") or {}).get("roi") or 0) * 100,
         },
         "comparison": {
             "cost_change": float((result.get("comparison") or {}).get("cost_change") or 0),
@@ -193,7 +195,7 @@ def get_hourly(
             "cost": float(_get_value(row, "cost", 0) or 0),
             "profit": float(_get_value(row, "profit", 0) or 0),
             "revenue": float(_get_value(row, "revenue", 0) or 0),
-            "roi": float(_get_value(row, "roi", 0) or 0),
+            "roi": float(_get_value(row, "roi", 0) or 0) * 100,
         }
         for row in rows
     ]
@@ -259,7 +261,7 @@ def get_hourly_period(
             "cost": float(_get_value(row, "cost", 0) or 0),
             "profit": float(_get_value(row, "profit", 0) or 0),
             "revenue": float(_get_value(row, "revenue", 0) or 0),
-            "roi": float(_get_value(row, "roi", 0) or 0),
+            "roi": float(_get_value(row, "roi", 0) or 0) * 100,
         }
         for row in rows
     ]
@@ -457,3 +459,78 @@ def get_conversion_breakdown_route(
     )
     return data
 
+
+@router.get(
+    "/cartpanda/offer/{offer_id}",
+    summary="Busca dados de uma oferta Cartpanda",
+    description=(
+        "Busca informações de uma oferta Cartpanda específica do Redtrack.\n\n"
+        "- `offer_id`: ID da oferta a buscar\n"
+        "- Retorna os dados completos da oferta ou erro 404 se não encontrada"
+    ),
+    response_model=OfferResponse,
+    responses={
+        200: {
+            "description": "Dados da oferta retornados com sucesso",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "offer_id": "123456",
+                        "name": "Minha Oferta Cartpanda",
+                        "status": "active",
+                        "data": {
+                            "id": "123456",
+                            "name": "Minha Oferta Cartpanda",
+                            "status": "active",
+                            # ... outros dados da oferta ...
+                        }
+                    }
+                }
+            },
+        },
+        404: {"description": "Oferta não encontrada ou requisição inválida"},
+    },
+)
+def get_cartpanda_offer(
+    offer_id: str = Path(
+        ...,
+        description="ID da oferta Cartpanda a buscar",
+        examples=["123456"],
+    )
+):
+    """
+    Busca dados de uma oferta Cartpanda no Redtrack.
+    
+    Quando o checkout é Cartpanda, esse endpoint busca os detalhes completos
+    da oferta usando o offer_id armazenado nas métricas.
+    """
+    if not offer_id or not offer_id.strip():
+        return {
+            "offer_id": "",
+            "name": "N/A",
+            "status": "invalid",
+            "data": {"error": "offer_id vazio ou inválido"}
+        }
+    
+    # Chamar o serviço para buscar dados da oferta
+    offer_data = sync_fetch_offer_data(offer_id)
+    
+    if not offer_data:
+        return {
+            "offer_id": offer_id,
+            "name": "N/A",
+            "status": "not_found",
+            "data": {"error": f"Oferta {offer_id} não encontrada no Redtrack"}
+        }
+    
+    # Extrair campos úteis da resposta
+    name = "N/A"
+    if isinstance(offer_data, dict):
+        name = offer_data.get("name") or offer_data.get("offer_name") or "N/A"
+    
+    return {
+        "offer_id": offer_id,
+        "name": name,
+        "status": "found",
+        "data": offer_data
+    }

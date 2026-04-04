@@ -72,6 +72,13 @@ export interface ConversionBreakdownMetric {
   checkout_conversion: number;
 }
 
+export interface OfferResponse {
+  offer_id: string;
+  name: string;
+  status: "found" | "not_found" | "invalid";
+  data: Record<string, unknown>;
+}
+
 interface HealthResponse {
   status: string;
 }
@@ -192,6 +199,14 @@ export const fetchConversionBreakdown = (
 export const checkBackendHealth = async (): Promise<boolean> => {
   const health = await fetchJson<HealthResponse>("/health");
   return health.status === "ok";
+};
+
+export const fetchCartpandaOffer = (offerId: string): Promise<OfferResponse> => {
+  if (!offerId || !offerId.trim()) {
+    return Promise.reject(new Error("offer_id é obrigatório"));
+  }
+  const path = `/metrics/cartpanda/offer/${encodeURIComponent(offerId)}`;
+  return fetchJson<OfferResponse>(path);
 };
 
 export const useDebouncedValue = <T>(value: T, delayMs = 250): T => {

@@ -69,7 +69,7 @@ def _hourly_to_list(rows):
                 "cost": float(mapping.get("cost") or 0),
                 "profit": float(mapping.get("profit") or 0),
                 "revenue": float(mapping.get("revenue") or 0),
-                "roi": float(mapping.get("roi") or 0),
+                "roi": float(mapping.get("roi") or 0) * 100,
             }
         )
     return result

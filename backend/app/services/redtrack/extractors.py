@@ -125,6 +125,59 @@ def get_offer_id(row: dict) -> str | None:
     return offer_id or None
 
 
+def get_offer_kits(payload: object) -> tuple[str, str, str]:
+    """
+    Extrai kit 1, kit 2 e kit 3 de uma resposta do endpoint /offer.
+
+    A API pode devolver esses campos em formatos diferentes; por isso, o parser
+    percorre estruturas aninhadas e tenta tanto chaves diretas quanto listas de kits.
+    """
+    kit_keys = (
+        ("kit1", "kit_1", "kit 1"),
+        ("kit2", "kit_2", "kit 2"),
+        ("kit3", "kit_3", "kit 3"),
+    )
+
+    def iter_dicts(value: object):
+        if isinstance(value, dict):
+            yield value
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    yield from iter_dicts(nested)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, (dict, list)):
+                    yield from iter_dicts(item)
+
+    def clean(value: object) -> str:
+        return str(value or "").strip() or "unknown"
+
+    kits = ["unknown", "unknown", "unknown"]
+
+    for current in iter_dicts(payload):
+        kits_list = current.get("kits")
+        if isinstance(kits_list, list):
+            for idx, item in enumerate(kits_list[:3]):
+                if kits[idx] == "unknown":
+                    kits[idx] = clean(item)
+
+        for idx, keys in enumerate(kit_keys):
+            if kits[idx] != "unknown":
+                continue
+
+            for key in keys:
+                if key in current:
+                    value = clean(current.get(key))
+                    if value != "unknown":
+                        kits[idx] = value
+                        break
+
+        if all(value != "unknown" for value in kits):
+            break
+
+    return kits[0], kits[1], kits[2]
+
+
 def get_conversion_type(row: dict) -> Optional[str]:
     """
     Extrai e normaliza tipo de conversão.
@@ -178,7 +231,8 @@ def get_event_count(row: dict) -> int:
         if raw is None:
             continue
         try:
-            return max(int(float(raw)), 0)
+            numeric = float(str(raw).strip())
+            return max(int(numeric), 0)
         except (TypeError, ValueError):
             continue
     

@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+from typing import Callable
 
 import httpx
 
@@ -19,64 +21,71 @@ from .settings import (
     REDTRACK_API_KEY,
     REDTRACK_CONVERSIONS_URL,
     REDTRACK_REPORT_URL,
+    REDTRACK_OFFER_URL,
     REDTRACK_CONVERSIONS_PER_PAGE,
     REDTRACK_CONVERSIONS_MAX_PAGES,
+    SAO_PAULO_TZ,
 )
 
 logger = logging.getLogger(__name__)
 
-# Tipos de conversão que queremos filtrar
+# Tipos de conversão suportados pelo dashboard.
 VALID_CONVERSION_TYPES = {"purchase", "initiatecheckout"}
 
+
+def _pick_raw_or_resolved(raw_value: str | None, resolved_value: str | None) -> str:
+    raw = str(raw_value or "").strip()
+    resolved = str(resolved_value or "").strip()
+
+    if resolved and resolved.lower() != "unknown":
+        return resolved
+
+    return raw or "unknown"
+
+
+def _is_cartpanda_checkout(checkout: str | None) -> bool:
+    return str(checkout or "").strip().lower() == "cartpanda"
+
+
+def _best_kit_product(*kits: str) -> str:
+    for kit in kits:
+        clean = str(kit or "").strip()
+        if clean and clean.lower() != "unknown":
+            return clean
+    return "unknown"
 
 
 def extract_campaign_info(campaign_name: str, campaign_id: str = "", offer_id: str | None = None) -> CampaignInfo:
     """
-    Extrai informações da nomenclatura da campanha.
-    
-    Formato esperado:
-    FB | FBR-Renato | Cartpanda | ED | ErosLift | Conta 6 BM: MS | elevateandwell.com | 24/12
-     0       1           2        3      4              5                  6              7
-    
-    - Índice 0: Plataforma (FB)
-    - Índice 1: Squad-Responsável (FBR-Renato)
-    - Índice 2: Checkout (Cartpanda, Clickbank)
-    - Índice 3: Nicho (ED)
-    - Índice 4: Produto (ErosLift)
+    Extrai e normaliza dados úteis da nomenclatura da campanha.
+
+    O texto completo é usado para resolver aliases e, quando não houver match,
+    o valor bruto da campanha é preservado.
     """
     parts = [part.strip() for part in str(campaign_name or "").split("|") if part.strip()]
-    
+
     info = CampaignInfo(
         campaign_id=campaign_id or campaign_name,
         offer_id=(str(offer_id).strip() if offer_id else None),
         campaign_name=campaign_name,
     )
-    
+
     if len(parts) > 0:
         info.platform = parts[0].upper()
-    
-    # Squad/checkout são resolvidos no texto completo para não depender da ordem dos campos.
-    # Se não houver match no mapping, preservamos o valor bruto da nomenclatura.
-    squad_resolved = resolve_squad(campaign_name)
-    checkout_resolved = resolve_checkout(campaign_name)
 
-    raw_squad = parts[1].strip() if len(parts) > 1 else ""
-    raw_checkout = parts[2].strip() if len(parts) > 2 else ""
+    raw_squad = parts[1] if len(parts) > 1 else ""
+    raw_checkout = parts[2] if len(parts) > 2 else ""
+    raw_product = parts[4] if len(parts) > 4 else ""
 
-    info.squad = squad_resolved if squad_resolved != "unknown" else (raw_squad or "unknown")
-    info.checkout = checkout_resolved if checkout_resolved != "unknown" else (raw_checkout or "unknown")
+    info.squad = _pick_raw_or_resolved(raw_squad, resolve_squad(campaign_name))
+    info.checkout = _pick_raw_or_resolved(raw_checkout, resolve_checkout(campaign_name))
 
     if len(parts) > 3:
         info.niche = parts[3].strip().upper()
-    
-    # Produto também é resolvido no texto completo para padronizar aliases.
-    # Sem match, usamos o valor bruto da parte esperada da campanha.
-    product_resolved = resolve_product(campaign_name)
-    raw_product = parts[4].strip() if len(parts) > 4 else ""
-    info.product = product_resolved if product_resolved != "unknown" else (raw_product or "unknown")
+
+    info.product = _pick_raw_or_resolved(raw_product, resolve_product(campaign_name))
 
     return info
-
 
 
 def _extract_rows(payload: object) -> list[dict]:
@@ -92,43 +101,185 @@ def _extract_rows(payload: object) -> list[dict]:
     return []
 
 
-async def _fetch_conversions_page(
+def _parse_row_datetime(row: dict) -> datetime | None:
+    for key in (
+        "datetime",
+        "event_time",
+        "conversion_time",
+        "created_at",
+        "time",
+        "timestamp",
+        "date_time",
+    ):
+        raw = row.get(key)
+        if raw is None:
+            continue
+
+        if isinstance(raw, (int, float)):
+            try:
+                ts = float(raw)
+                if ts > 1e12:
+                    ts = ts / 1000.0
+                return datetime.fromtimestamp(ts, tz=SAO_PAULO_TZ)
+            except Exception:
+                continue
+
+        text = str(raw).strip()
+        if not text:
+            continue
+
+        normalized = text.replace("Z", "+00:00")
+        for candidate in (normalized, text):
+            try:
+                return datetime.fromisoformat(candidate)
+            except ValueError:
+                continue
+
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S%z",
+            "%Y-%m-%dT%H:%M:%S%z",
+        ):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+
+    return None
+
+
+def _filter_rows_by_hour_window(
+    rows: list[dict],
+    *,
+    hour_start: datetime | None,
+    hour_end: datetime | None,
+) -> list[dict]:
+    if hour_start is None or hour_end is None:
+        return rows
+
+    filtered: list[dict] = []
+    parsed_count = 0
+    unknown_count = 0
+    outside_count = 0
+
+    for row in rows:
+        row_dt = _parse_row_datetime(row)
+        if row_dt is None:
+            unknown_count += 1
+            continue
+
+        parsed_count += 1
+        if row_dt.tzinfo is None:
+            row_dt = row_dt.replace(tzinfo=SAO_PAULO_TZ)
+        else:
+            row_dt = row_dt.astimezone(SAO_PAULO_TZ)
+
+        if hour_start <= row_dt < hour_end:
+            filtered.append(row)
+        else:
+            outside_count += 1
+
+    if parsed_count == 0:
+        logger.warning(
+            "⚠️ Não foi possível identificar timestamp nas linhas de conversão. "
+            "Mantendo janela diária para evitar perda de dados.",
+        )
+        return rows
+
+    logger.info(
+        "🕐 Conversões filtradas por hora: inicio=%s fim=%s | total=%s parseadas=%s fora_janela=%s desconhecidas=%s selecionadas=%s",
+        hour_start.isoformat(),
+        hour_end.isoformat(),
+        len(rows),
+        parsed_count,
+        outside_count,
+        unknown_count,
+        len(filtered),
+    )
+    return filtered
+
+
+async def _fetch_paginated_rows(
+    client: httpx.AsyncClient,
+    *,
+    url: str,
+    base_params: dict[str, object],
+    per_page: int,
+    max_pages: int | None = None,
+    delay_after: float = 0.3,
+) -> list[dict]:
+    """Busca páginas consecutivas até acabar o payload ou atingir o limite."""
+    params = dict(base_params)
+    params.update({"per": per_page, "page": 1})
+    endpoint = str(url).rstrip("/").split("/")[-1] or "unknown"
+
+    rows_acc: list[dict] = []
+    page = 1
+
+    while max_pages is None or page <= max_pages:
+        logger.info("📄 [%s] Buscando página %s", endpoint, page)
+        try:
+            payload = await make_request_with_retry(client, url, params, delay_after=delay_after)
+        except Exception as exc:
+            logger.error("❌ [%s] Falha na página %s: %s", endpoint, page, exc)
+            raise
+
+        rows = _extract_rows(payload)
+        if not rows:
+            logger.info("✅ [%s] Fim da paginação na página %s (sem linhas)", endpoint, page)
+            break
+
+        rows_acc.extend(rows)
+        logger.info("✅ [%s] Página %s concluída (%s linhas)", endpoint, page, len(rows))
+        if len(rows) < per_page:
+            logger.info("✅ [%s] Última página identificada: %s", endpoint, page)
+            break
+
+        page += 1
+        params["page"] = page
+
+    return rows_acc
+
+
+async def fetch_conversion_rows(
     client: httpx.AsyncClient,
     *,
     date_from: str,
     date_to: str,
-    page: int = 1,
-    per_page: int = REDTRACK_CONVERSIONS_PER_PAGE,
 ) -> list[dict]:
-    """Busca uma página de conversões da API."""
-    params = {
-        "api_key": REDTRACK_API_KEY,
-        "date_from": date_from,
-        "date_to": date_to,
-        "timezone": "America/Sao_Paulo",
-        "per": per_page,
-        "page": page,
-    }
-
-    rows = await make_request_with_retry(
-        client, 
-        REDTRACK_CONVERSIONS_URL, 
-        params, 
-        delay_after=0.3
+    """Busca linhas brutas de /conversions para possível reuso entre etapas."""
+    return await _fetch_paginated_rows(
+        client,
+        url=REDTRACK_CONVERSIONS_URL,
+        base_params={
+            "api_key": REDTRACK_API_KEY,
+            "date_from": date_from,
+            "date_to": date_to,
+            "timezone": "America/Sao_Paulo",
+        },
+        per_page=REDTRACK_CONVERSIONS_PER_PAGE,
+        max_pages=REDTRACK_CONVERSIONS_MAX_PAGES,
+        delay_after=0.3,
     )
-    
-    parsed = _extract_rows(rows)
-    if parsed:
-        return parsed
 
-    if isinstance(rows, dict):
-        logger.warning(
-            "Resposta de conversões sem lista de linhas. Chaves recebidas: %s",
-            sorted(rows.keys()),
-        )
-    else:
-        logger.warning("Resposta inesperada da API: esperado lista/dict, recebido %s", type(rows))
-    return []
+
+async def _fetch_offer_payload(
+    client: httpx.AsyncClient,
+    *,
+    offer_id: str,
+) -> object:
+    for params in (
+        {"api_key": REDTRACK_API_KEY, "id": offer_id},
+        {"api_key": REDTRACK_API_KEY, "offer_id": offer_id},
+        {"api_key": REDTRACK_API_KEY, "offerId": offer_id},
+    ):
+        try:
+            return await make_request_with_retry(client, REDTRACK_OFFER_URL, params, delay_after=0.0)
+        except Exception:
+            logger.debug("Falha ao buscar offer com params %s", sorted(params.keys()))
+
+    return {}
 
 
 async def _fetch_report_event_rows(
@@ -138,30 +289,98 @@ async def _fetch_report_event_rows(
     date_from: str,
     date_to: str,
 ) -> list[dict]:
-    params = {
-        "api_key": REDTRACK_API_KEY,
-        "group": "campaign",
-        "date_from": date_from,
-        "date_to": date_to,
-        "type": event_type,
-        "timezone": "America/Sao_Paulo",
-        "per": 500,
-        "page": 1,
-    }
+    return await _fetch_paginated_rows(
+        client,
+        url=REDTRACK_REPORT_URL,
+        base_params={
+            "api_key": REDTRACK_API_KEY,
+            "group": "campaign",
+            "date_from": date_from,
+            "date_to": date_to,
+            "type": event_type,
+            "timezone": "America/Sao_Paulo",
+        },
+        per_page=500,
+        delay_after=0.3,
+    )
 
-    rows_acc: list[dict] = []
-    while True:
-        payload = await make_request_with_retry(client, REDTRACK_REPORT_URL, params, delay_after=0.3)
-        rows = _extract_rows(payload)
-        if not rows:
-            break
 
-        rows_acc.extend(rows)
-        if len(rows) < params["per"]:
-            break
-        params["page"] += 1
+def _build_campaign_info_cache_entry(
+    row: dict,
+    campaign_id: str,
+    campaign_info_cache: dict[str, CampaignInfo],
+) -> CampaignInfo:
+    info = campaign_info_cache.get(campaign_id)
+    if info is not None:
+        return info
 
-    return rows_acc
+    campaign_name = get_campaign_name(row)
+    offer_name = get_offer_name(row)
+    mapping_source = build_mapping_source_text(campaign_name, offer_name)
+    offer_id = get_offer_id(row)
+
+    info = extract_campaign_info(mapping_source or campaign_name, campaign_id, offer_id)
+    campaign_info_cache[campaign_id] = info
+    return info
+
+
+def _aggregate_conversion_rows(
+    result: AggregatedConversions,
+    campaign_info_cache: dict[str, CampaignInfo],
+    rows: list[dict],
+    *,
+    count_getter: Callable[[dict], int],
+) -> int:
+    processed = 0
+
+    for row in rows:
+        conv_type = get_conversion_type(row)
+        if conv_type not in VALID_CONVERSION_TYPES:
+            continue
+
+        campaign_id = get_campaign_id(row)
+        if not campaign_id:
+            continue
+
+        info = _build_campaign_info_cache_entry(row, campaign_id, campaign_info_cache)
+        count = count_getter(row)
+        is_purchase = conv_type == "purchase"
+
+        result.campaign_info[campaign_id] = info
+        aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
+        aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
+        aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
+        aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
+        processed += 1
+
+    return processed
+
+
+def _aggregate_report_rows(
+    result: AggregatedConversions,
+    campaign_info_cache: dict[str, CampaignInfo],
+    rows: list[dict],
+    *,
+    is_purchase: bool,
+) -> int:
+    processed = 0
+
+    for row in rows:
+        campaign_id = get_campaign_id(row)
+        if not campaign_id:
+            continue
+
+        info = _build_campaign_info_cache_entry(row, campaign_id, campaign_info_cache)
+        count = get_event_count(row)
+
+        result.campaign_info[campaign_id] = info
+        aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
+        aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
+        aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
+        aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
+        processed += 1
+
+    return processed
 
 
 async def _fallback_fetch_all_conversions_via_report(
@@ -174,38 +393,9 @@ async def _fallback_fetch_all_conversions_via_report(
 
     result = AggregatedConversions()
     campaign_info_cache: dict[str, CampaignInfo] = {}
-
     for event_type, is_purchase in (("InitiateCheckout", False), ("Purchase", True)):
-        rows = await _fetch_report_event_rows(
-            client,
-            event_type=event_type,
-            date_from=date_from,
-            date_to=date_to,
-        )
-
-        for row in rows:
-            campaign_id = get_campaign_id(row)
-            if not campaign_id:
-                continue
-
-            campaign_name = get_campaign_name(row)
-            offer_name = get_offer_name(row)
-            mapping_source = build_mapping_source_text(campaign_name, offer_name)
-            offer_id = get_offer_id(row)
-            count = get_event_count(row)
-
-            if campaign_id not in campaign_info_cache:
-                campaign_info_cache[campaign_id] = extract_campaign_info(
-                    mapping_source or campaign_name, campaign_id, offer_id,
-                )
-
-            info = campaign_info_cache[campaign_id]
-            result.campaign_info[campaign_id] = info
-
-            aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
-            aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
-            aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
-            aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
+        rows = await _fetch_report_event_rows(client, event_type=event_type, date_from=date_from, date_to=date_to)
+        _aggregate_report_rows(result, campaign_info_cache, rows, is_purchase=is_purchase)
 
     return result
 
@@ -215,76 +405,45 @@ async def fetch_all_conversions(
     *,
     date_from: str,
     date_to: str,
+    hour_start: datetime | None = None,
+    hour_end: datetime | None = None,
+    prefetched_rows: list[dict] | None = None,
 ) -> AggregatedConversions:
-    """
-    Busca todas as conversões do período e agrega por campanha, squad, checkout e produto.
-    Filtra apenas eventos Purchase e InitiateCheckout.
+    """Busca conversões do período e agrega por campanha, squad, checkout e produto.
+
+    Quando `hour_start/hour_end` são informados, aplica filtro de janela horária
+    em memória para suportar ingestão incremental por hora.
     """
     logger.info(
         "📡 Buscando conversões (InitiateCheckout + Purchase) de %s a %s...",
         date_from,
         date_to,
     )
-    
+
     result = AggregatedConversions()
     campaign_info_cache: dict[str, CampaignInfo] = {}
-    total_rows = 0
-    filtered_rows = 0
+    rows = prefetched_rows if prefetched_rows is not None else await fetch_conversion_rows(
+        client,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
-    page = 1
-    while page <= REDTRACK_CONVERSIONS_MAX_PAGES:
-        rows = await _fetch_conversions_page(
-            client,
-            date_from=date_from,
-            date_to=date_to,
-            page=page,
-        )
+    rows = _filter_rows_by_hour_window(
+        rows,
+        hour_start=hour_start,
+        hour_end=hour_end,
+    )
 
-        if not rows:
-            break
+    if rows:
+        logger.debug("Campos recebidos em conversões (amostra): %s", sorted(rows[0].keys()))
 
-        if page == 1:
-            logger.info("🔎 Campos recebidos em conversões (amostra): %s", sorted(rows[0].keys()))
-
-        total_rows += len(rows)
-
-        for row in rows:
-            conv_type = get_conversion_type(row)
-            if conv_type is None:
-                # Ignora qualquer tipo que nao seja Purchase/InitiateCheckout.
-                continue
-
-            filtered_rows += 1
-            campaign_id = get_campaign_id(row)
-            if not campaign_id:
-                continue
-
-            campaign_name = get_campaign_name(row)
-            offer_name = get_offer_name(row)
-            mapping_source = build_mapping_source_text(campaign_name, offer_name)
-            offer_id = get_offer_id(row)
-            # /conversions retorna eventos brutos; cada linha equivale a 1 evento.
-            count = 1
-
-            if campaign_id not in campaign_info_cache:
-                campaign_info_cache[campaign_id] = extract_campaign_info(
-                    mapping_source or campaign_name, campaign_id, offer_id,
-                )
-
-            info = campaign_info_cache[campaign_id]
-            result.campaign_info[campaign_id] = info
-
-            is_purchase = conv_type == "purchase"
-            aggregate_by_dimension(result, result.by_campaign, campaign_id, is_purchase, count)
-            aggregate_by_dimension(result, result.by_squad, info.squad, is_purchase, count)
-            aggregate_by_dimension(result, result.by_checkout, info.checkout, is_purchase, count)
-            aggregate_by_dimension(result, result.by_product, info.product, is_purchase, count)
-
-        logger.debug("Página %s: %s linhas, %s filtradas", page, len(rows), filtered_rows)
-        if len(rows) < REDTRACK_CONVERSIONS_PER_PAGE:
-            break
-        page += 1
-
+    total_rows = len(rows)
+    filtered_rows = _aggregate_conversion_rows(
+        result,
+        campaign_info_cache,
+        rows,
+        count_getter=get_event_count,
+    )
 
     logger.info(
         "✅ Conversões processadas: %s total, %s filtradas (Purchase/InitiateCheckout)",
@@ -315,7 +474,7 @@ async def fetch_all_conversions(
         len(result.by_checkout),
         len(result.by_product),
     )
-    
+
     return result
 
 
@@ -363,7 +522,7 @@ async def fetch_all_events(
     Retorna eventos no formato antigo (dict[campaign_id, {InitiateCheckout, Purchase}]).
     """
     conversions = await fetch_all_conversions(client, date_from=date_from, date_to=date_to)
-    
+
     return {
         campaign_id: {
             "InitiateCheckout": metrics.initiate_checkout,

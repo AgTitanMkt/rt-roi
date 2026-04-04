@@ -7,13 +7,17 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from ..models.metrics import DailySummary, HourlyMetric
-from .redtrack.mappings import resolve_product, resolve_squad, resolve_checkout
+from .redtrack.mappings import resolve_product, resolve_squad, resolve_checkout, normalize_mapping_token
 from .redtrack.settings import SQUAD_MAPPINGS
 
 logger = logging.getLogger(__name__)
 
 
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def _product_token(value: str | None) -> str:
+    return normalize_mapping_token(value)
 
 
 def _q2(value) -> Decimal:
@@ -383,7 +387,11 @@ def get_summary(
                 WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :start_date AND :end_date
                   AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
                   AND (:checkout IS NULL OR UPPER(checkout_type) = UPPER(:checkout))
-                  AND (:product IS NULL OR UPPER(product) = UPPER(:product))
+                  AND (
+                    :product IS NULL
+                    OR regexp_replace(UPPER(product), '[\\s_-]+', '', 'g')
+                       = regexp_replace(UPPER(:product), '[\\s_-]+', '', 'g')
+                  )
             """
             params: dict[str, object] = {
                 "start_date": start_date,
@@ -431,14 +439,14 @@ def get_summary(
             "profit": _q2(getattr(current_data, "profit", 0) or 0),
             "revenue": _q2(getattr(current_data, "revenue", 0) or 0),
             "checkout": current_checkout if current_checkout is not None else _q2(getattr(current_data, "checkout_avg", 0) or 0),
-            "roi": _q4(getattr(current_data, "roi", 0) or 0),
+            "roi": _q4(getattr(current_data, "roi", 0) or 0) * 100,
         },
         "yesterday": {
             "cost": _q2(getattr(previous_data, "cost", 0) or 0),
             "profit": _q2(getattr(previous_data, "profit", 0) or 0),
             "revenue": _q2(getattr(previous_data, "revenue", 0) or 0),
             "checkout": previous_checkout if previous_checkout is not None else _q2(getattr(previous_data, "checkout_avg", 0) or 0),
-            "roi": _q4(getattr(previous_data, "roi", 0) or 0),
+            "roi": _q4(getattr(previous_data, "roi", 0) or 0) * 100,
         },
         "comparison": {
             "cost_change": 0,
@@ -589,7 +597,11 @@ def get_metrics_by_period(
         WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :date_start AND :date_end
           AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
           AND (:checkout IS NULL OR UPPER(checkout_type) = UPPER(:checkout))
-          AND (:product IS NULL OR UPPER(product) = UPPER(:product))
+          AND (
+            :product IS NULL
+            OR regexp_replace(UPPER(product), '[\\s_-]+', '', 'g')
+               = regexp_replace(UPPER(:product), '[\\s_-]+', '', 'g')
+          )
         GROUP BY
             date_trunc('hour', timezone('America/Sao_Paulo', metric_at)),
             EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at)),
@@ -654,9 +666,11 @@ def get_checkout_summary(db: Session, squad: str = None, period: str = "24h"):
     }
     
     if squad:
-        query += " AND (UPPER(squad) = UPPER(:squad) OR squad = 'ALL')"
+        query += " AND UPPER(squad) = UPPER(:squad)"
         params["squad"] = squad
-    
+    else:
+        query += " AND squad = 'ALL'"
+
     query += " GROUP BY checkout ORDER BY checkout_conversion DESC"
     
     result = db.execute(text(query), params)
@@ -712,9 +726,11 @@ def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
     }
     
     if squad:
-        query += " AND (UPPER(squad) = UPPER(:squad) OR squad = 'ALL')"
+        query += " AND UPPER(squad) = UPPER(:squad)"
         params["squad"] = squad
-    
+    else:
+        query += " AND squad = 'ALL'"
+
     query += " GROUP BY product ORDER BY checkout_conversion DESC"
     
     result = db.execute(text(query), params)
@@ -837,7 +853,7 @@ def get_squad_checkout_summary(db: Session, period: str = "24h"):
             "profit": float(row.profit or 0),
             "revenue": float(row.revenue or 0),
             "checkout_conversion": float(row.checkout_conversion or 0),
-            "roi": float(row.roi or 0),
+            "roi": float(row.roi or 0) * 100,
         }
         for row in rows
     ]
@@ -870,7 +886,11 @@ def get_conversion_breakdown(
             WHERE metric_date <= :today
               AND (:squad IS NULL OR UPPER(squad) = UPPER(:squad))
               AND (:checkout IS NULL OR UPPER(checkout) = UPPER(:checkout))
-              AND (:product IS NULL OR UPPER(product) = UPPER(:product))
+              AND (
+                :product IS NULL
+                OR regexp_replace(UPPER(product), '[\\s_-]+', '', 'g')
+                   = regexp_replace(UPPER(:product), '[\\s_-]+', '', 'g')
+              )
         """
         latest_row = db.execute(
             text(latest_query),
@@ -906,7 +926,11 @@ def get_conversion_breakdown(
         WHERE metric_date BETWEEN :date_start AND :date_end
           AND (:squad IS NULL OR UPPER(squad) = UPPER(:squad))
           AND (:checkout IS NULL OR UPPER(checkout) = UPPER(:checkout))
-          AND (:product IS NULL OR UPPER(product) = UPPER(:product))
+          AND (
+            :product IS NULL
+            OR regexp_replace(UPPER(product), '[\\s_-]+', '', 'g')
+               = regexp_replace(UPPER(:product), '[\\s_-]+', '', 'g')
+          )
         GROUP BY squad, checkout, product
         ORDER BY purchase DESC, initiate_checkout DESC
     """
@@ -930,7 +954,7 @@ def get_conversion_breakdown(
         product_resolved = resolve_product(product_raw)
         product_value = product_resolved if product_resolved != "unknown" else (product_raw or "UNKNOWN")
 
-        if product and str(product_value).upper() != str(product).upper():
+        if product and _product_token(product_value) != _product_token(product):
             continue
 
         normalized.append(

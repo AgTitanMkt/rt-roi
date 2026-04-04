@@ -16,7 +16,7 @@ const resolveRevenue = (metrics?: {
   if (!metrics) return 0;
   if (metrics.revenue != null) return metrics.revenue;
   if (metrics.cost != null && metrics.profit != null) return metrics.cost + metrics.profit;
-  if (metrics.cost != null && metrics.roi != null) return metrics.cost * (1 + metrics.roi);
+  if (metrics.cost != null && metrics.roi != null) return metrics.cost * (1 + metrics.roi / 100);
   return 0;
 };
 
@@ -134,6 +134,7 @@ function App() {
             categoria={formatPercentage(comparison?.roi_change)}
             tendencia={(comparison?.roi_change ?? 0) < 0 ? "baixa" : "alta"}
             prefixo=""
+            sufixo="%"
             className="isHighlight"
           />
         </section>

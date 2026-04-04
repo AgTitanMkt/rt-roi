@@ -71,3 +71,9 @@ class ConversionBreakdownItem(BaseModel):
     checkout_conversion: float = Field(..., examples=[30.0], description="Taxa de conversao em %")
 
 
+class OfferResponse(BaseModel):
+    """Resposta com dados de uma oferta Cartpanda"""
+    offer_id: str = Field(..., examples=["123456"], description="ID da oferta")
+    name: str = Field(default="N/A", examples=["Minha Oferta"], description="Nome da oferta")
+    status: str = Field(default="unknown", examples=["active"], description="Status da oferta")
+    data: dict = Field(..., description="Dados completos da oferta retornados da API Redtrack")

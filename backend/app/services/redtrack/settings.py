@@ -8,16 +8,18 @@ load_dotenv(find_dotenv(usecwd=True))
 REDTRACK_API_KEY = os.getenv("REDTRACK_API_KEY")
 REDTRACK_REPORT_URL = "https://api.redtrack.io/report"
 REDTRACK_CONVERSIONS_URL = "https://api.redtrack.io/conversions"
+REDTRACK_OFFER_URL = "https://api.redtrack.io/offer"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 1
 MAX_BACKOFF = 60
-RATE_LIMIT_DELAY = 0.5
+RATE_LIMIT_DELAY = 1.0  # Aumentado de 0.5 para 1.0 segundo para evitar erros 409
 
-# Conversões: limitar paginação para evitar estouro de rate limit.
+# Conversões: buscar TODAS as páginas (sem limite artificial)
+# Aumentado de 15 para 1000 para capturar dados completos
 REDTRACK_CONVERSIONS_PER_PAGE = int(os.getenv("REDTRACK_CONVERSIONS_PER_PAGE", "1000"))
-REDTRACK_CONVERSIONS_MAX_PAGES = int(os.getenv("REDTRACK_CONVERSIONS_MAX_PAGES", "15"))
+REDTRACK_CONVERSIONS_MAX_PAGES = int(os.getenv("REDTRACK_CONVERSIONS_MAX_PAGES", "1000"))
 
 UNKNOWN_DIMENSION = "unknown"
 
