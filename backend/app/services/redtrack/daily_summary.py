@@ -153,7 +153,7 @@ def persist_daily_summary_snapshot(
     metric_date: date,
     events_by_campaign: dict[str, dict[str, int]] | None = None,
     conversions: Optional[AggregatedConversions] = None,
-) -> None:
+) -> dict[str, int]:
     """
     Persiste os dados de resumo diário.
     
@@ -164,7 +164,7 @@ def persist_daily_summary_snapshot(
         conversions: Novo formato com agregações por checkout e produto
     """
     if not rows:
-        return
+        return {"saved_checkout": 0, "saved_purchase": 0}
 
     by_squad: dict[str, dict[str, Decimal | int]] = {}
     
@@ -301,6 +301,11 @@ def persist_daily_summary_snapshot(
         if conversions:
             logger.info("📊 Checkouts salvos: %s", list(conversions.by_checkout.keys()))
             logger.info("📊 Produtos salvos: %s", list(conversions.by_product.keys()))
+
+        return {
+            "saved_checkout": int(total_initiate),
+            "saved_purchase": int(total_purchase),
+        }
             
     except Exception:
         db.rollback()

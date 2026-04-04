@@ -162,6 +162,7 @@ async def redtrack_reports() -> RedtrackResponse:
         logger.info("📌 ETAPA 2: Buscando conversões em requisição separada...")
         conversions: dict[str, float] = {}
         aggregated_conversions = AggregatedConversions()
+        prefetched_conversion_rows_by_day: dict[str, list[dict]] = {}
 
         try:
             # Busca uma vez o dia atual para o bloco hourly; o snapshot diário vem do banco.
@@ -170,6 +171,7 @@ async def redtrack_reports() -> RedtrackResponse:
                 date_from=date_from,
                 date_to=date_to,
             )
+            prefetched_conversion_rows_by_day[date_from] = prefetched_conversion_rows
 
             aggregated_conversions = await fetch_all_conversions(
                 client,
@@ -178,6 +180,12 @@ async def redtrack_reports() -> RedtrackResponse:
                 hour_start=last_closed_hour,
                 hour_end=hour_end,
                 prefetched_rows=prefetched_conversion_rows,
+            )
+
+            logger.info(
+                "📥 Conversões recebidas (janela horária) | checkout=%s purchase=%s",
+                aggregated_conversions.total.initiate_checkout,
+                aggregated_conversions.total.purchase,
             )
 
             conversions = get_conversion_rates_by_campaign(aggregated_conversions)
@@ -235,13 +243,37 @@ async def redtrack_reports() -> RedtrackResponse:
                 target_day = target_date.strftime("%Y-%m-%d")
                 summary_rows = await fetch_daily_summary_rows(client, target_date=target_day)
 
-                # Reaproveita o snapshot já persistido no banco para não chamar o Redtrack novamente.
-                target_conversions = load_daily_conversions_snapshot(target_date)
+                # Reaproveita as conversões já buscadas nesta execução para a mesma data,
+                # evitando nova chamada à API e evitando usar snapshot defasado.
+                prefetched_rows = prefetched_conversion_rows_by_day.get(target_day)
+                if prefetched_rows is not None:
+                    target_conversions = await fetch_all_conversions(
+                        client,
+                        date_from=target_day,
+                        date_to=target_day,
+                        prefetched_rows=prefetched_rows,
+                    )
+                else:
+                    # Fallback sem nova chamada remota: usa snapshot persistido no banco.
+                    target_conversions = load_daily_conversions_snapshot(target_date)
 
-                persist_daily_summary_snapshot(
-                    summary_rows, 
+                logger.info(
+                    "📥 Conversões recebidas (%s) | checkout=%s purchase=%s",
+                    target_day,
+                    target_conversions.total.initiate_checkout,
+                    target_conversions.total.purchase,
+                )
+
+                persisted_totals = persist_daily_summary_snapshot(
+                    summary_rows,
                     target_date, 
                     conversions=target_conversions,
+                )
+                logger.info(
+                    "💾 Conversões salvas no banco (%s) | checkout=%s purchase=%s",
+                    target_day,
+                    int((persisted_totals or {}).get("saved_checkout") or 0),
+                    int((persisted_totals or {}).get("saved_purchase") or 0),
                 )
 
         except Exception as exc:
