@@ -24,6 +24,7 @@ from .settings import (
     REDTRACK_OFFER_URL,
     REDTRACK_CONVERSIONS_PER_PAGE,
     REDTRACK_CONVERSIONS_MAX_PAGES,
+    RATE_LIMIT_DELAY,
     SAO_PAULO_TZ,
 )
 
@@ -207,7 +208,7 @@ async def _fetch_paginated_rows(
     base_params: dict[str, object],
     per_page: int,
     max_pages: int | None = None,
-    delay_after: float = 0.3,
+    delay_after: float = RATE_LIMIT_DELAY,
 ) -> list[dict]:
     """Busca páginas consecutivas até acabar o payload ou atingir o limite."""
     params = dict(base_params)
@@ -260,7 +261,7 @@ async def fetch_conversion_rows(
         },
         per_page=REDTRACK_CONVERSIONS_PER_PAGE,
         max_pages=REDTRACK_CONVERSIONS_MAX_PAGES,
-        delay_after=0.3,
+        delay_after=RATE_LIMIT_DELAY,
     )
 
 
@@ -301,7 +302,7 @@ async def _fetch_report_event_rows(
             "timezone": "America/Sao_Paulo",
         },
         per_page=500,
-        delay_after=0.3,
+        delay_after=RATE_LIMIT_DELAY,
     )
 
 

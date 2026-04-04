@@ -7,11 +7,13 @@ import httpx
 
 from ...core.database import SessionLocal
 from ...models.metrics import DailySummary, DailyCheckoutSummary, DailyProductSummary, DailyConversionEntity
+from .aggregators import aggregate_by_dimension
 from ..metrics_service import get_summary as get_summary_metrics
 from .conversions import AggregatedConversions, extract_campaign_info
 from .http_client import make_request_with_retry
 from .mappings import resolve_squad, resolve_checkout, resolve_product
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL
+from .models import CampaignInfo
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,52 @@ def _normalize_and_format(raw_value: str | None, normalized_value: str | None) -
 
 def _extract_squad_from_campaign_name(campaign_name: str) -> str:
     return extract_campaign_info(campaign_name).squad
+
+
+def load_daily_conversions_snapshot(metric_date: date) -> AggregatedConversions:
+    """Carrega as conversões diárias já persistidas no banco para reutilização sem nova requisição."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DailyConversionEntity).filter(
+            DailyConversionEntity.metric_date == metric_date,
+        ).all()
+
+        result = AggregatedConversions()
+        for row in rows:
+            campaign_id = str(row.campaign_id or "").strip()
+            if not campaign_id:
+                continue
+
+            squad = _normalize_and_format(row.squad, resolve_squad(str(row.squad or "")))
+            checkout = _normalize_and_format(row.checkout, resolve_checkout(str(row.checkout or "")))
+            product = _normalize_and_format(row.product, resolve_product(str(row.product or "")))
+            info = CampaignInfo(
+                campaign_id=campaign_id,
+                campaign_name=campaign_id,
+                offer_id=str(row.offer_id).strip() or None,
+                squad=squad.lower() if squad != "UNKNOWN" else squad,
+                checkout=checkout,
+                product=product,
+            )
+
+            result.campaign_info[campaign_id] = info
+
+            initiate_total = int(row.initiate_checkout or 0)
+            purchase_total = int(row.purchase or 0)
+
+            aggregate_by_dimension(result, result.by_campaign, campaign_id, False, initiate_total)
+            aggregate_by_dimension(result, result.by_campaign, campaign_id, True, purchase_total)
+            aggregate_by_dimension(result, result.by_squad, squad, False, initiate_total)
+            aggregate_by_dimension(result, result.by_squad, squad, True, purchase_total)
+            aggregate_by_dimension(result, result.by_checkout, checkout, False, initiate_total)
+            aggregate_by_dimension(result, result.by_checkout, checkout, True, purchase_total)
+            aggregate_by_dimension(result, result.by_product, product, False, initiate_total)
+            aggregate_by_dimension(result, result.by_product, product, True, purchase_total)
+
+        logger.info("💾 Conversões carregadas do banco para %s: %s campanhas", metric_date, len(result.by_campaign))
+        return result
+    finally:
+        db.close()
 
 
 async def fetch_daily_summary_rows(

@@ -12,9 +12,9 @@ REDTRACK_OFFER_URL = "https://api.redtrack.io/offer"
 SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
 MAX_RETRIES = 5
-INITIAL_BACKOFF = 1
-MAX_BACKOFF = 60
-RATE_LIMIT_DELAY = 1.0  # Aumentado de 0.5 para 1.0 segundo para evitar erros 409
+INITIAL_BACKOFF = 2
+MAX_BACKOFF = 120
+RATE_LIMIT_DELAY = 2.0  # Mais tempo entre requisições para reduzir conflito/rate limit
 
 # Conversões: buscar TODAS as páginas (sem limite artificial)
 # Aumentado de 15 para 1000 para capturar dados completos

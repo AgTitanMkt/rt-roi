@@ -12,7 +12,7 @@ from .conversions import (
     extract_campaign_info,
     AggregatedConversions,
 )
-from .daily_summary import fetch_daily_summary_rows, persist_daily_summary_snapshot
+from .daily_summary import fetch_daily_summary_rows, persist_daily_summary_snapshot, load_daily_conversions_snapshot
 from .http_client import make_request_with_retry
 from .persistence import persist_metrics_report
 from .settings import REDTRACK_API_KEY, REDTRACK_REPORT_URL, SAO_PAULO_TZ
@@ -162,16 +162,14 @@ async def redtrack_reports() -> RedtrackResponse:
         logger.info("📌 ETAPA 2: Buscando conversões em requisição separada...")
         conversions: dict[str, float] = {}
         aggregated_conversions = AggregatedConversions()
-        prefetched_conversion_rows_by_day: dict[str, list[dict]] = {}
 
         try:
-            # Busca uma vez o dia atual e reaproveita em hourly + snapshot diário.
+            # Busca uma vez o dia atual para o bloco hourly; o snapshot diário vem do banco.
             prefetched_conversion_rows = await fetch_conversion_rows(
                 client,
                 date_from=date_from,
                 date_to=date_to,
             )
-            prefetched_conversion_rows_by_day[date_from] = prefetched_conversion_rows
 
             aggregated_conversions = await fetch_all_conversions(
                 client,
@@ -237,34 +235,12 @@ async def redtrack_reports() -> RedtrackResponse:
                 target_day = target_date.strftime("%Y-%m-%d")
                 summary_rows = await fetch_daily_summary_rows(client, target_date=target_day)
 
-                # Snapshot diário sempre usa conversões do dia inteiro para manter
-                # cards/relatórios consistentes no frontend.
-                prefetched_rows = prefetched_conversion_rows_by_day.get(target_day)
-                if prefetched_rows is not None:
-                    target_conversions = await fetch_all_conversions(
-                        client,
-                        date_from=target_day,
-                        date_to=target_day,
-                        prefetched_rows=prefetched_rows,
-                    )
-                else:
-                    target_conversions = await fetch_all_conversions(
-                        client,
-                        date_from=target_day,
-                        date_to=target_day,
-                    )
-                target_events = {
-                    campaign_id: {
-                        "InitiateCheckout": metrics.initiate_checkout,
-                        "Purchase": metrics.purchase,
-                    }
-                    for campaign_id, metrics in target_conversions.by_campaign.items()
-                }
+                # Reaproveita o snapshot já persistido no banco para não chamar o Redtrack novamente.
+                target_conversions = load_daily_conversions_snapshot(target_date)
 
                 persist_daily_summary_snapshot(
                     summary_rows, 
                     target_date, 
-                    target_events,
                     conversions=target_conversions,
                 )
 
