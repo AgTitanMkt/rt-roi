@@ -1,271 +1,85 @@
-# 📊 Dashboard RedTrack (React + FastAPI + PostgreSQL)
+# RT-ROI Dashboard
 
-## 🚀 Visão Geral
+Dashboard de performance com ingestao de dados do RedTrack, backend FastAPI e frontend React.
 
-Este projeto é um dashboard para visualização de métricas de campanhas (Revenue, Cost, Profit e ROI) consumindo dados da API do RedTrack.
+## Visao geral
 
-A aplicação foi construída com foco em:
+- Objetivo: acompanhar custo, receita, lucro, checkout e ROI com filtros centralizados.
+- Frontend: React + Vite + Recharts.
+- Backend: FastAPI + SQLAlchemy + Alembic.
+- Dados: PostgreSQL (persistencia) + Redis (cache).
+- Infra: Docker Compose (frontend, backend, db, redis, cron).
 
-* Performance
-* Escalabilidade
-* Facilidade de evolução
+## Arquitetura
 
----
-
-## 🧱 Stack Utilizada
-
-### Frontend
-
-* React
-* Vite
-* React query (requisições HTTP)
-* Recharts (gráficos)
-
-### Backend
-
-* FastAPI
-* httpx (requisições async)
-* SQLModel
-* Alembic
-* Pydantic
-
-### Banco de Dados
-
-* PostgreSQL
-
-### Cache
-
-* Redis
-
-### Infra
-
-* Docker + Docker Compose
-* Nginx (gateway)
-
----
-
-## 🧠 Arquitetura
-
-```
-React → Nginx → FastAPI → PostgreSQL
-                      ↓
-                    Redis
-                      ↓
-                 RedTrack API
+```text
+Frontend (React) -> /api -> Backend (FastAPI) -> PostgreSQL
+                                  |
+                                  +-> Redis
+                                  +-> RedTrack API (pipeline/sincronizacao)
 ```
 
-### Regras importantes:
+## Estrutura principal
 
-* O frontend nunca acessa o RedTrack diretamente
-* Toda lógica fica no backend
-* O backend é responsável por:
-  * Buscar dados
-  * Cachear
-  * Persistir
+- `backend/`: API, servicos, modelos e migracoes.
+- `frontend/`: dashboard, filtros globais e graficos.
+- `docker-compose.yml`: sobe ambiente completo local.
+- `backend/app/services/redtrack/`: pipeline de ingestao e normalizacao.
 
----
-
-## 📊 Funcionalidades
-
-* KPIs principais:
-  * Revenue
-  * Cost
-  * Profit
-  * ROI
-
-* Gráfico:
-  * Revenue vs Cost por hora
-
-* Filtros:
-  * Intervalo de datas
-  * Campanha (futuro)
-
----
-
-## ⚙️ Funcionamento
-
-O sistema funciona sob demanda:
-
-1. Frontend chama `/dashboard`
-2. Backend verifica:
-   * Existe dado recente no cache?
-     * Sim → retorna
-     * Não → verifica banco
-     
-3. Se banco estiver desatualizado:
-   * Busca dados no RedTrack
-   * Salva no banco
-   * Atualiza cache
-   
-4. Retorna resposta
-
----
-
-## ⏱️ Estratégia de Cache
-
-* TTL padrão: 5 minutos
-* Redis é sempre a primeira fonte
-* Banco é fallback
-* RedTrack é última opção
-
----
-
-## 🗄️ Banco de Dados
-
-### Tabela principal: `metrics_hourly`
-
-```sql
-CREATE TABLE metrics_hourly (
-    id SERIAL PRIMARY KEY,
-    datetime TIMESTAMP NOT NULL,
-    campaign_id TEXT,
-    revenue NUMERIC,
-    cost NUMERIC,
-    profit NUMERIC,
-    roi NUMERIC,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(datetime, campaign_id)
-);
-```
-
----
-
-## 🔌 Endpoint principal
-
-### Endpoints Principais
-
-#### `GET /metrics/summary`
-
-Retorna os KPIs agregados (custo total, lucro total e ROI) de todas as fontes.
-
-**Query Parameters:**
-- `source` (opcional): Filtra por origem de tráfego (ex: `mediago`, `google`, `facebook`)
-
-**Exemplo de resposta:**
-```json
-{
-  "cost": 169.21,
-  "profit": 60.79,
-  "roi": 0.36
-}
-```
-
----
-
-#### `GET /metrics/hourly`
-
-Retorna uma série temporal por hora com custo, lucro e ROI agregados. Filtra automaticamente apenas as horas de **hoje**.
-
-**Query Parameters:**
-- `source` (opcional): Filtra por origem de tráfego (ex: `mediago`, `google`, `facebook`)
-
-**Exemplo de resposta:**
-```json
-[
-  {
-    "hour": "14",
-    "cost": 12.1,
-    "profit": 4.2,
-    "roi": 0.35
-  },
-  {
-    "hour": "15",
-    "cost": 10.4,
-    "profit": 3.1,
-    "roi": 0.30
-  }
-]
-```
-
----
-
-### Endpoints de Saúde
-
-#### `GET /health`
-
-Verifica a disponibilidade geral da API.
-
----
-
-#### `GET /health/db`
-
-Verifica a conexão com o banco de dados PostgreSQL.
-
----
-
-## 📚 Documentação Interativa (Swagger)
-
-A API inclui documentação interativa automática gerada pelo **Swagger UI** e **ReDoc**.
-
-**Acesso:**
-- Swagger UI: `/docs`
-- ReDoc: `/redoc`
-
-Nesta interface você pode:
-- ✅ Ver todos os endpoints disponíveis
-- ✅ Testar requisições diretamente no navegador
-- ✅ Consultar esquemas de requisição e resposta
-- ✅ Verificar exemplos de respostas para cada endpoint
-
-**Exemplo de URL local:**
-```
-http://localhost:8000/docs
-```
-
-
----
-
-## 🐳 Como rodar o projeto
-
-### 1. Clonar repositório
-
-```bash
-git clone <repo>
-cd project
-```
-
-### 2. Subir containers
+## Como rodar (local)
 
 ```bash
 docker compose up -d --build
 ```
 
----
+Acessos comuns:
 
-## 🌐 Rotas
+- Frontend: `http://localhost`
+- API (via proxy): `http://localhost/api`
+- Docs da API: `http://localhost/api/docs`
 
-* `/` → Frontend (React)
-* `/api` → Backend (FastAPI)
+## Filtros suportados
 
----
+Filtros principais usados no sistema:
 
-## 📌 Objetivo do projeto
+- `period`
+- `source` / `squad`
+- `checkout`
+- `product`
+- `date_start`
+- `date_end`
 
-Construir um dashboard rápido, confiável e pronto para escalar sem precisar refatorar toda a base no futuro.
+No frontend, os filtros ficam centralizados no contexto e refletem nas requisicoes.
 
----
+## Endpoints principais (fase atual)
 
-## Jenkins (pipeline inicial)
+- `GET /metrics/summary`
+  - Cards principais (hoje, ontem e comparacao).
+- `GET /metrics/hourly/period`
+  - Serie horaria para grafico principal.
+  - Aceita filtros e intervalo por data.
+- `GET /metrics/conversion-breakdown`
+  - Conversao por squad/checkout/produto.
+  - Aceita filtros e intervalo por data.
+- `GET /metrics/charts/compare`
+  - Compara duas datas para os graficos.
+  - Query obrigatoria: `base_date`, `compare_date`.
+- `GET /health`
+  - Healthcheck basico.
 
-O repositório agora inclui um `Jenkinsfile` na raiz com uma pipeline CI inicial para:
+## Fluxo de dados resumido
 
-- Backend (`backend/`): criar venv, instalar dependências e validar sintaxe com `compileall`
-- Frontend (`frontend/`): `npm ci`, `npm run lint` e `npm run build`
-- Infra: validação de `docker-compose.yml` com `docker compose config -q`
+1. Pipeline coleta dados do RedTrack.
+2. Backend normaliza e persiste no banco.
+3. Frontend consome endpoints filtrados.
+4. Graficos podem comparar dia base vs dia comparado.
 
-### Pré-requisitos no agente Jenkins
+## Documentacao por camada
 
-- Git
-- Python 3
-- Node.js 20+ e npm
-- Docker CLI + plugin Compose (para o estágio de Docker)
+- Frontend: `frontend/README.md`
+- Backend: `backend/README.md`
 
-### Como criar o job
+## Observacoes
 
-1. No Jenkins, crie um novo item do tipo **Pipeline**.
-2. Em **Pipeline Definition**, selecione **Pipeline script from SCM**.
-3. Configure o repositório Git deste projeto.
-4. Mantenha `Jenkinsfile` como **Script Path**.
-5. Salve e execute o build.
-
-> Observação: se o agente não tiver Docker disponível, remova temporariamente o estágio `Docker Compose Check` do `Jenkinsfile`.
+- O projeto esta em evolucao continua de mapeamentos, filtros e qualidade de dados.
+- Em caso de divergencia visual, validar payload retornado pelos endpoints da API primeiro.
