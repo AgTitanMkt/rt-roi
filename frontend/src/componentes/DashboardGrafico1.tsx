@@ -37,6 +37,86 @@ type HourAgg = {
   count: number;
 };
 
+type UnifiedChartRow = {
+  xKey: string;
+  axisLabel: string;
+  checkout_base: number;
+  gasto_base: number;
+  faturamento_base: number;
+  relacao_base: number;
+  checkout_compare: number;
+  gasto_compare: number;
+  faturamento_compare: number;
+  relacao_compare: number;
+};
+
+type ComparisonTooltipProps = {
+  active?: boolean;
+  payload?: Array<{ payload: UnifiedChartRow }>;
+  label?: string | number;
+  compareLabel?: CompareLabel;
+  isCompareMode: boolean;
+};
+
+const ComparisonTooltip = ({
+  active,
+  payload,
+  label,
+  compareLabel,
+  isCompareMode,
+}: ComparisonTooltipProps) => {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const row = payload[0]?.payload;
+  const hourLabel = `${String(label).padStart(2, "0")}:00`;
+
+  return (
+    <div
+      style={{
+        backgroundColor: "#0f172a",
+        border: "1px solid #334155",
+        borderRadius: "8px",
+        padding: "10px 12px",
+        minWidth: "240px",
+      }}
+    >
+      <div style={{ color: "#e2e8f0", fontWeight: 700, marginBottom: "8px" }}>
+        Hora: {hourLabel}
+      </div>
+
+      <div style={{ color: "#bfdbfe", fontSize: "12px", fontWeight: 600 }}>
+        {compareLabel ? `Base (${compareLabel.baseDate})` : "Base"}
+      </div>
+      <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Checkout: {Number(row.checkout_base || 0).toFixed(2)}%</div>
+      <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Gasto: ${Number(row.gasto_base || 0).toFixed(2)}</div>
+      <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Faturamento: ${Number(row.faturamento_base || 0).toFixed(2)}</div>
+      <div style={{ color: "#cbd5e1", fontSize: "12px", marginBottom: isCompareMode ? "8px" : 0 }}>
+        ROI: {Number(row.relacao_base || 0).toFixed(2)}%
+      </div>
+
+      {isCompareMode && (
+        <>
+          <div style={{ color: "rgba(226, 232, 240, 0.75)", fontSize: "12px", fontWeight: 600 }}>
+            {compareLabel ? `Comparado (${compareLabel.compareDate})` : "Comparado"}
+          </div>
+          <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+            Checkout: {Number(row.checkout_compare || 0).toFixed(2)}%
+          </div>
+          <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+            Gasto: ${Number(row.gasto_compare || 0).toFixed(2)}
+          </div>
+          <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+            Faturamento: ${Number(row.faturamento_compare || 0).toFixed(2)}
+          </div>
+          <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+            ROI: {Number(row.relacao_compare || 0).toFixed(2)}%
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const extractHour = (item: HourlyMetric): number => {
   const hourFromField = Number(item.hour ?? "");
   if (!Number.isNaN(hourFromField)) return hourFromField;
@@ -132,74 +212,6 @@ const DashboardGrafico = ({
     relacao_compare: compareLabel ? `ROI ${compareLabel.compareDate}` : "ROI comparado",
   };
 
-  const ComparisonTooltip = (props: {
-    active?: boolean;
-    payload?: Array<{ payload: Record<string, number> }>;
-    label?: string | number;
-  }) => {
-    const { active, payload, label } = props;
-    if (!active || !payload || payload.length === 0) return null;
-
-    const row = payload[0]?.payload as {
-      checkout_base: number;
-      gasto_base: number;
-      faturamento_base: number;
-      relacao_base: number;
-      checkout_compare: number;
-      gasto_compare: number;
-      faturamento_compare: number;
-      relacao_compare: number;
-    };
-
-    const hourLabel = `${String(label).padStart(2, "0")}:00`;
-
-    return (
-      <div
-        style={{
-          backgroundColor: "#0f172a",
-          border: "1px solid #334155",
-          borderRadius: "8px",
-          padding: "10px 12px",
-          minWidth: "240px",
-        }}
-      >
-        <div style={{ color: "#e2e8f0", fontWeight: 700, marginBottom: "8px" }}>
-          Hora: {hourLabel}
-        </div>
-
-        <div style={{ color: "#bfdbfe", fontSize: "12px", fontWeight: 600 }}>
-          {compareLabel ? `Base (${compareLabel.baseDate})` : "Base"}
-        </div>
-        <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Checkout: {Number(row.checkout_base || 0).toFixed(2)}%</div>
-        <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Gasto: ${Number(row.gasto_base || 0).toFixed(2)}</div>
-        <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Faturamento: ${Number(row.faturamento_base || 0).toFixed(2)}</div>
-        <div style={{ color: "#cbd5e1", fontSize: "12px", marginBottom: isCompareMode ? "8px" : 0 }}>
-          ROI: {Number(row.relacao_base || 0).toFixed(2)}%
-        </div>
-
-        {isCompareMode && (
-          <>
-            <div style={{ color: "rgba(226, 232, 240, 0.75)", fontSize: "12px", fontWeight: 600 }}>
-              {compareLabel ? `Comparado (${compareLabel.compareDate})` : "Comparado"}
-            </div>
-            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
-              Checkout: {Number(row.checkout_compare || 0).toFixed(2)}%
-            </div>
-            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
-              Gasto: ${Number(row.gasto_compare || 0).toFixed(2)}
-            </div>
-            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
-              Faturamento: ${Number(row.faturamento_compare || 0).toFixed(2)}
-            </div>
-            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
-              ROI: {Number(row.relacao_compare || 0).toFixed(2)}%
-            </div>
-          </>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div className="chartContainer ui-card">
       <div className="chartHeader">
@@ -274,7 +286,7 @@ const DashboardGrafico = ({
               <YAxis yAxisId="relacao" hide domain={relacaoDomain} />
               <Tooltip
                 shared
-                content={<ComparisonTooltip />}
+                content={<ComparisonTooltip compareLabel={compareLabel} isCompareMode={isCompareMode} />}
               />
               <Legend
                 wrapperStyle={{ fontSize: "11px", color: "#94a3b8" }}
