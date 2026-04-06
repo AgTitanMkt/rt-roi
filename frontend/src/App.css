@@ -213,6 +213,32 @@
   justify-content: flex-end;
 }
 
+.compareLegendRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.compareBadge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.12);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.compareBadge--faded {
+  border-color: rgba(148, 163, 184, 0.35);
+  color: rgba(226, 232, 240, 0.72);
+  background: rgba(148, 163, 184, 0.12);
+}
+
 .chartCanvas {
   width: 100%;
   flex: 1;

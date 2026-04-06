@@ -8,6 +8,7 @@ import {
   fetchProductMetrics,
   fetchSquadMetrics,
   fetchConversionBreakdown,
+  fetchChartsCompare,
   checkBackendHealth,
 } from "../utils/reqs";
 import { normalizeSquadFilter } from "../utils/squadMapping";
@@ -32,6 +33,14 @@ export interface UseFilteredDataResult {
   products: ProductMetric[];
   squads: SquadMetric[];
   conversionBreakdown: ConversionBreakdownMetric[];
+  chartComparisonData: {
+    baseDate: string;
+    compareDate: string;
+    hourlyBase: HourlyMetric[];
+    hourlyCompare: HourlyMetric[];
+    breakdownBase: ConversionBreakdownMetric[];
+    breakdownCompare: ConversionBreakdownMetric[];
+  } | null;
   isHealthy: boolean;
   isLoading: boolean;
   error: string | null;
@@ -46,7 +55,7 @@ interface UseFilteredDataParams {
 export const useFilteredData = ({
   refreshMs = 60_000,
 }: UseFilteredDataParams = {}): UseFilteredDataResult => {
-  const { filters } = useFilters();
+  const { filters, chartComparison } = useFilters();
 
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [hourly, setHourly] = useState<HourlyMetric[]>([]);
@@ -54,6 +63,9 @@ export const useFilteredData = ({
   const [products, setProducts] = useState<ProductMetric[]>([]);
   const [squads, setSquads] = useState<SquadMetric[]>([]);
   const [conversionBreakdown, setConversionBreakdown] = useState<ConversionBreakdownMetric[]>([]);
+  const [chartComparisonData, setChartComparisonData] = useState<UseFilteredDataResult["chartComparisonData"]>(
+    null,
+  );
   const [isHealthy, setIsHealthy] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -163,6 +175,33 @@ export const useFilteredData = ({
           if (requestId === requestIdRef.current) setConversionBreakdown([]);
         });
 
+      const chartComparisonPromise = chartComparison.enabled
+        ? fetchChartsCompare(
+            chartComparison.base_date,
+            chartComparison.compare_date,
+            params.source,
+            params.checkout,
+            params.product,
+          )
+            .then((payload) => {
+              if (requestId === requestIdRef.current) {
+                setChartComparisonData({
+                  baseDate: payload.base_date,
+                  compareDate: payload.compare_date,
+                  hourlyBase: payload.base.hourly,
+                  hourlyCompare: payload.compare.hourly,
+                  breakdownBase: payload.base.conversion_breakdown,
+                  breakdownCompare: payload.compare.conversion_breakdown,
+                });
+              }
+            })
+            .catch(() => {
+              if (requestId === requestIdRef.current) setChartComparisonData(null);
+            })
+        : Promise.resolve().then(() => {
+            if (requestId === requestIdRef.current) setChartComparisonData(null);
+          });
+
       await Promise.all([
         healthPromise,
         summaryPromise,
@@ -171,6 +210,7 @@ export const useFilteredData = ({
         productsPromise,
         squadsPromise,
         breakdownPromise,
+        chartComparisonPromise,
       ]);
 
       if (errors.length > 0) {
@@ -185,7 +225,7 @@ export const useFilteredData = ({
     } finally {
       if (requestId === requestIdRef.current) setIsLoading(false);
     }
-  }, [filters, buildApiParams]);
+  }, [filters, buildApiParams, chartComparison]);
 
   // Recarregar dados quando filtros mudam
   useEffect(() => {
@@ -208,6 +248,7 @@ export const useFilteredData = ({
     products,
     squads,
     conversionBreakdown,
+    chartComparisonData,
     isHealthy,
     isLoading,
     error,

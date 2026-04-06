@@ -20,7 +20,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   showAdvanced = false,
   onFiltersChange,
 }) => {
-  const { filters, updateFilter, resetFilters } = useFilters();
+  const { filters, updateFilter, resetFilters, chartComparison, updateChartComparison, resetChartComparison } = useFilters();
 
   const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const period = e.target.value as Filters["period"];
@@ -54,7 +54,22 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
   const handleReset = () => {
     resetFilters();
+    resetChartComparison();
     onFiltersChange?.({ period: "24h" });
+  };
+
+  const handleCompareEnabledChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    updateChartComparison("enabled", e.target.checked);
+  };
+
+  const handleBaseDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.value) return;
+    updateChartComparison("base_date", e.target.value);
+  };
+
+  const handleCompareDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.value) return;
+    updateChartComparison("compare_date", e.target.value);
   };
 
   if (compact) {
@@ -183,6 +198,47 @@ export const FilterBar: React.FC<FilterBarProps> = ({
            <button onClick={handleReset} className="filterBar__reset">
              Limpar Filtros
            </button>
+         </div>
+
+         <div className="filterBar__row filterBar__row--advanced">
+           <div className="filterBar__group filterBar__group--checkbox">
+             <label htmlFor="compare-enabled" className="filterBar__label">
+               Comparar gráficos
+             </label>
+             <input
+               id="compare-enabled"
+               type="checkbox"
+               checked={chartComparison.enabled}
+               onChange={handleCompareEnabledChange}
+               className="filterBar__checkbox"
+             />
+           </div>
+
+           <div className="filterBar__group">
+             <label htmlFor="compare-base-date" className="filterBar__label">
+               Dia base
+             </label>
+             <input
+               id="compare-base-date"
+               type="date"
+               value={chartComparison.base_date}
+               onChange={handleBaseDateChange}
+               className="filterBar__input"
+             />
+           </div>
+
+           <div className="filterBar__group">
+             <label htmlFor="compare-target-date" className="filterBar__label">
+               Comparar com
+             </label>
+             <input
+               id="compare-target-date"
+               type="date"
+               value={chartComparison.compare_date}
+               onChange={handleCompareDateChange}
+               className="filterBar__input"
+             />
+           </div>
          </div>
 
          {/* Linha 2: Filtros avançados (opcional) */}

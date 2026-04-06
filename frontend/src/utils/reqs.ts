@@ -30,6 +30,7 @@ export interface SummaryResponse {
 
 export interface HourlyMetric {
   squad: string;
+  metric_date?: string;
   slot: string;
   day: "today" | "yesterday" | string;
   hour: string;
@@ -64,6 +65,7 @@ export interface SquadMetric {
 }
 
 export interface ConversionBreakdownMetric {
+  metric_date?: string;
   squad: string;
   checkout: string;
   product: string;
@@ -81,6 +83,19 @@ export interface OfferResponse {
 
 interface HealthResponse {
   status: string;
+}
+
+export interface ChartComparisonSeries {
+  date: string;
+  hourly: HourlyMetric[];
+  conversion_breakdown: ConversionBreakdownMetric[];
+}
+
+export interface ChartComparisonResponse {
+  base_date: string;
+  compare_date: string;
+  base: ChartComparisonSeries;
+  compare: ChartComparisonSeries;
 }
 
 interface UseDashboardDataParams {
@@ -160,11 +175,15 @@ export const fetchHourly = (
   period: string = "24h",
   checkout?: string,
   product?: string,
+  dateStart?: string,
+  dateEnd?: string,
 ): Promise<HourlyMetric[]> => {
   let path = `/metrics/hourly/period?period=${period}`;
   if (squad && squad !== DEFAULT_SQUAD) path += `&source=${squad}`;
   if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${checkout}`;
   if (product && product !== DEFAULT_SQUAD) path += `&product=${product}`;
+  if (dateStart) path += `&date_start=${dateStart}`;
+  if (dateEnd) path += `&date_end=${dateEnd}`;
   return fetchJson<HourlyMetric[]>(path);
 };
 
@@ -187,13 +206,31 @@ export const fetchConversionBreakdown = (
   squad?: string,
   checkout?: string,
   product?: string,
+  dateStart?: string,
+  dateEnd?: string,
 ): Promise<ConversionBreakdownMetric[]> => {
   let path = `/metrics/conversion-breakdown?period=${period}`;
   // Não enviar "all" como squad - deixar em branco significa todos os squads
   if (squad && squad !== DEFAULT_SQUAD) path += `&squad=${squad}`;
   if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${checkout}`;
   if (product && product !== DEFAULT_SQUAD) path += `&product=${product}`;
+  if (dateStart) path += `&date_start=${dateStart}`;
+  if (dateEnd) path += `&date_end=${dateEnd}`;
   return fetchJson<ConversionBreakdownMetric[]>(path);
+};
+
+export const fetchChartsCompare = (
+  baseDate: string,
+  compareDate: string,
+  squad?: string,
+  checkout?: string,
+  product?: string,
+): Promise<ChartComparisonResponse> => {
+  let path = `/metrics/charts/compare?base_date=${encodeURIComponent(baseDate)}&compare_date=${encodeURIComponent(compareDate)}`;
+  if (squad && squad !== DEFAULT_SQUAD) path += `&source=${encodeURIComponent(squad)}`;
+  if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${encodeURIComponent(checkout)}`;
+  if (product && product !== DEFAULT_SQUAD) path += `&product=${encodeURIComponent(product)}`;
+  return fetchJson<ChartComparisonResponse>(path);
 };
 
 export const checkBackendHealth = async (): Promise<boolean> => {

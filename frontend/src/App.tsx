@@ -29,8 +29,17 @@ const getChangePercent = (current: number, previous: number): number => {
 };
 
 function App() {
-  const { filters } = useFilters();
-  const { summary, hourly, conversionBreakdown, isHealthy, isLoading, error, lastUpdated } =
+  const { filters, chartComparison } = useFilters();
+  const {
+    summary,
+    hourly,
+    conversionBreakdown,
+    chartComparisonData,
+    isHealthy,
+    isLoading,
+    error,
+    lastUpdated,
+  } =
     useFilteredData();
 
 
@@ -56,6 +65,38 @@ function App() {
         revenue: resolveRevenue(item),
       })),
     [hourly],
+  );
+
+  const chartHourlyData = useMemo(() => {
+    if (!chartComparison.enabled || !chartComparisonData) {
+      return hourlyWithResolvedRevenue;
+    }
+
+    return chartComparisonData.hourlyBase.map((item) => ({
+      ...item,
+      revenue: resolveRevenue(item),
+    }));
+  }, [chartComparison.enabled, chartComparisonData, hourlyWithResolvedRevenue]);
+
+  const compareHourlyData = useMemo(() => {
+    if (!chartComparison.enabled || !chartComparisonData) {
+      return [];
+    }
+
+    return chartComparisonData.hourlyCompare.map((item) => ({
+      ...item,
+      revenue: resolveRevenue(item),
+    }));
+  }, [chartComparison.enabled, chartComparisonData]);
+
+  const chartConversionBreakdown = useMemo(
+    () => (!chartComparison.enabled || !chartComparisonData ? conversionBreakdown : chartComparisonData.breakdownBase),
+    [chartComparison.enabled, chartComparisonData, conversionBreakdown],
+  );
+
+  const compareConversionBreakdown = useMemo(
+    () => (!chartComparison.enabled || !chartComparisonData ? [] : chartComparisonData.breakdownCompare),
+    [chartComparison.enabled, chartComparisonData],
   );
 
   const formatMoney = (value: number | undefined): number =>
@@ -142,15 +183,30 @@ function App() {
 
       <section className="chartPanel">
         <DashboardGrafico1
-          hourlyData={hourlyWithResolvedRevenue}
+          hourlyData={chartHourlyData}
+          comparedHourlyData={compareHourlyData}
           isLoading={isLoading}
           selectedSquad={filters.squad || ""}
-          period={filters.period}
+          period={chartComparison.enabled ? "daily" : filters.period}
+          compareLabel={
+            chartComparison.enabled && chartComparisonData
+              ? { baseDate: chartComparisonData.baseDate, compareDate: chartComparisonData.compareDate }
+              : undefined
+          }
         />
       </section>
 
       <section className="conversionSection">
-        <ConversionInsightsChart data={conversionBreakdown} isLoading={isLoading} />
+        <ConversionInsightsChart
+          data={chartConversionBreakdown}
+          comparedData={compareConversionBreakdown}
+          isLoading={isLoading}
+          compareLabel={
+            chartComparison.enabled && chartComparisonData
+              ? { baseDate: chartComparisonData.baseDate, compareDate: chartComparisonData.compareDate }
+              : undefined
+          }
+        />
       </section>
 
     </div>

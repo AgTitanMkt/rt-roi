@@ -29,6 +29,7 @@ class SummaryResponse(BaseModel):
 
 class HourlyMetricResponse(BaseModel):
     squad: str = Field("", examples=["FBR"], description="Squad associado ao filtro aplicado")
+    metric_date: str | None = Field(None, examples=["2026-04-06"], description="Data do ponto em America/Sao_Paulo")
     slot: str = Field(..., examples=["2026-03-28T14:00:00"], description="Timestamp da janela horaria em America/Sao_Paulo")
     day: str = Field(..., examples=["today", "yesterday"], description="Identifica se o ponto pertence a hoje ou ontem")
     hour: str = Field(..., examples=["14"], description="Hora do dia (formato HH, 0-23)")
@@ -63,6 +64,7 @@ class SquadSummaryItem(BaseModel):
 
 
 class ConversionBreakdownItem(BaseModel):
+    metric_date: str | None = Field(None, examples=["2026-04-06"], description="Data de referencia do agregado")
     squad: str = Field(..., examples=["FBR"], description="Squad")
     checkout: str = Field(..., examples=["Cartpanda"], description="Checkout")
     product: str = Field(..., examples=["ErosLift"], description="Produto")
@@ -77,3 +79,20 @@ class OfferResponse(BaseModel):
     name: str = Field(default="N/A", examples=["Minha Oferta"], description="Nome da oferta")
     status: str = Field(default="unknown", examples=["active"], description="Status da oferta")
     data: dict = Field(..., description="Dados completos da oferta retornados da API Redtrack")
+
+
+class ChartComparisonSeries(BaseModel):
+    date: str = Field(..., examples=["2026-04-06"], description="Data da serie")
+    hourly: list[HourlyMetricResponse] = Field(default_factory=list, description="Pontos horarios da data")
+    conversion_breakdown: list[ConversionBreakdownItem] = Field(
+        default_factory=list,
+        description="Conversao agregada da data",
+    )
+
+
+class ChartComparisonResponse(BaseModel):
+    base_date: str = Field(..., examples=["2026-04-06"], description="Data base selecionada")
+    compare_date: str = Field(..., examples=["2026-04-05"], description="Data usada para comparacao")
+    base: ChartComparisonSeries = Field(..., description="Dados da data base")
+    compare: ChartComparisonSeries = Field(..., description="Dados da data comparada")
+

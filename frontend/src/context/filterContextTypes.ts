@@ -15,11 +15,24 @@ export interface Filters {
   date_end?: string;
 }
 
+export interface ChartComparisonFilters {
+  enabled: boolean;
+  base_date: string;
+  compare_date: string;
+}
+
 export interface FilterContextType {
   filters: Filters;
+  chartComparison: ChartComparisonFilters;
   setFilters: (filters: Filters) => void;
+  setChartComparison: (filters: ChartComparisonFilters) => void;
   updateFilter: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
+  updateChartComparison: <K extends keyof ChartComparisonFilters>(
+    key: K,
+    value: ChartComparisonFilters[K],
+  ) => void;
   resetFilters: () => void;
+  resetChartComparison: () => void;
   getFilterParams: () => Record<string, string | undefined>;
 }
 

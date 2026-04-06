@@ -35,6 +35,17 @@
   gap: 8px;
 }
 
+.filterBar__group--checkbox {
+  justify-content: flex-end;
+}
+
+.filterBar__checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
 .filterBar__label {
   font-size: 12px;
   font-weight: 600;

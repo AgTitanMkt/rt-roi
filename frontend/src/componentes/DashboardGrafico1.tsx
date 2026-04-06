@@ -13,182 +13,98 @@ import {
 } from "recharts";
 import type { HourlyMetric } from "../utils/reqs.ts";
 
-const MAX_CHART_POINTS = 24;
+const HOURS_PER_DAY = 24;
+
+type CompareLabel = {
+  baseDate: string;
+  compareDate: string;
+};
 
 interface DashboardGraficoProps {
   hourlyData: HourlyMetric[];
+  comparedHourlyData?: HourlyMetric[];
   isLoading?: boolean;
   selectedSquad: string;
   period?: "24h" | "daily" | "weekly" | "monthly";
+  compareLabel?: CompareLabel;
 }
 
-// Agrupa dados por período
-const aggregateByPeriod = (data: HourlyMetric[], period: "24h" | "daily" | "weekly" | "monthly"): HourlyMetric[] => {
-  const grouped: Map<string, HourlyMetric> = new Map();
+type HourAgg = {
+  checkout: number;
+  gasto: number;
+  faturamento: number;
+  relacao: number;
+  count: number;
+};
 
-  data.forEach((item) => {
-    let key: string;
+const extractHour = (item: HourlyMetric): number => {
+  const hourFromField = Number(item.hour ?? "");
+  if (!Number.isNaN(hourFromField)) return hourFromField;
+  if (!item.slot) return 0;
+  const date = new Date(item.slot);
+  return Number.isNaN(date.getTime()) ? 0 : date.getHours();
+};
 
-    if (period === "24h" || period === "daily") {
-      // Para 24h e daily, agrupa por data+hora sem ajuste manual de timezone.
-      const day = item.slot ? String(item.slot).slice(0, 10) : "unknown-day";
-      const hour = String(item.hour ?? "0").padStart(2, "0");
-      key = `${day}_${hour}`;
-    } else if (period === "weekly") {
-      // Agrupa por dia da semana
-      const date = item.slot ? new Date(item.slot) : new Date();
-      const day = date.toLocaleDateString("pt-BR", { weekday: "long", month: "2-digit", day: "2-digit" });
-      key = day;
-    } else {
-      // monthly - agrupa por dia
-      const date = item.slot ? new Date(item.slot) : new Date();
-      const day = date.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
-      key = day;
-    }
+const aggregateByHour = (data: HourlyMetric[]): Map<number, HourAgg> => {
+  const grouped = new Map<number, HourAgg>();
 
-    if (grouped.has(key)) {
-      const existing = grouped.get(key)!;
-      grouped.set(key, {
-        ...existing,
-        cost: (existing.cost ?? 0) + (item.cost ?? 0),
-        profit: (existing.profit ?? 0) + (item.profit ?? 0),
-        revenue: (existing.revenue ?? 0) + (item.revenue ?? 0),
-        checkout_conversion: (existing.checkout_conversion ?? 0) + (item.checkout_conversion ?? 0),
-        roi: existing.roi !== 0 ? (existing.roi + item.roi) / 2 : item.roi, // ROI média
-      });
-    } else {
-      grouped.set(key, { ...item });
-    }
-  });
+  for (const item of data) {
+    const hour = extractHour(item);
+    const current = grouped.get(hour) ?? {
+      checkout: 0,
+      gasto: 0,
+      faturamento: 0,
+      relacao: 0,
+      count: 0,
+    };
 
-  return Array.from(grouped.values());
+    current.checkout += Number(item.checkout_conversion ?? 0);
+    current.gasto += Number(item.cost ?? 0);
+    current.faturamento += Number(item.revenue ?? 0);
+    current.relacao += Number(item.roi ?? 0);
+    current.count += 1;
+    grouped.set(hour, current);
+  }
+
+  return grouped;
 };
 
 const DashboardGrafico = ({
   hourlyData,
+  comparedHourlyData = [],
   isLoading = false,
   period = "24h",
+  compareLabel,
 }: DashboardGraficoProps) => {
-  // Agregar dados baseado no período
-  const aggregatedData = useMemo(() => aggregateByPeriod(hourlyData, period), [hourlyData, period]);
+  const isCompareMode = Boolean(compareLabel && comparedHourlyData.length > 0);
 
-  // Função para gerar chave consistente para cada período
-  const getConsistentKey = (item: HourlyMetric, period: "24h" | "daily" | "weekly" | "monthly"): string => {
-    if (period === "24h" || period === "daily") {
-      const day = item.slot ? String(item.slot).slice(0, 10) : "unknown-day";
-      const hour = String(item.hour ?? "0").padStart(2, "0");
-      return `${day}_${hour}`;
-    } else if (period === "weekly") {
-      const date = item.slot ? new Date(`${String(item.slot).slice(0, 10)}T12:00:00`) : new Date();
-      return date.toLocaleDateString("pt-BR", { weekday: "long", month: "2-digit", day: "2-digit" });
-    } else {
-      const date = item.slot ? new Date(`${String(item.slot).slice(0, 10)}T12:00:00`) : new Date();
-      return date.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
-    }
-  };
+  const dadosUnificados = useMemo(() => {
+    const baseByHour = aggregateByHour(hourlyData);
+    const compareByHour = aggregateByHour(comparedHourlyData);
 
-  const dadosUnificados = useMemo(
-    () => {
-      const shiftHourForward = (hourValue: string | number | null | undefined): number => {
-        const parsedHour = Number(hourValue ?? 0);
-
-        if (Number.isNaN(parsedHour)) {
-          return 0;
-        }
-
-        return (parsedHour + 1 + 24) % 24;
+    return Array.from({ length: HOURS_PER_DAY }, (_, hour) => {
+      const base = baseByHour.get(hour);
+      const compare = compareByHour.get(hour);
+      return {
+        xKey: String(hour),
+        axisLabel: `${String(hour).padStart(2, "0")}:00`,
+        checkout_base: base ? base.checkout : 0,
+        gasto_base: base ? base.gasto : 0,
+        faturamento_base: base ? base.faturamento : 0,
+        relacao_base: base && base.count > 0 ? base.relacao / base.count : 0,
+        checkout_compare: compare ? compare.checkout : 0,
+        gasto_compare: compare ? compare.gasto : 0,
+        faturamento_compare: compare ? compare.faturamento : 0,
+        relacao_compare: compare && compare.count > 0 ? compare.relacao / compare.count : 0,
       };
+    }).filter((item) => {
+      const baseHasData = item.checkout_base || item.gasto_base || item.faturamento_base || item.relacao_base;
+      const compareHasData = item.checkout_compare || item.gasto_compare || item.faturamento_compare || item.relacao_compare;
+      return Boolean(baseHasData || compareHasData);
+    });
+  }, [hourlyData, comparedHourlyData]);
 
-      const shiftSlotForward = (slotValue: string): Date | null => {
-        const parsed = new Date(slotValue);
-        if (Number.isNaN(parsed.getTime())) {
-          return null;
-        }
-
-        return new Date(parsed.getTime() + 60 * 60 * 1000);
-      };
-
-      const getOrderValue = (item: HourlyMetric): number => {
-        if (item.slot) {
-          const parsed = Date.parse(item.slot);
-
-          if (!Number.isNaN(parsed)) {
-            return parsed;
-          }
-        }
-
-        return Number(item.hour || 0);
-      };
-
-      const getAxisLabel = (item: HourlyMetric): string => {
-        if (period !== "24h" && period !== "daily" && item.slot) {
-          const date = new Date(item.slot);
-          if (period === "weekly") {
-            return date.toLocaleDateString("pt-BR", { weekday: "short", month: "2-digit", day: "2-digit" });
-          } else {
-            return date.toLocaleDateString("pt-BR", { month: "2-digit", day: "2-digit" });
-          }
-        }
-        const hourLabel = String(shiftHourForward(item.hour)).padStart(2, "0");
-        return `${hourLabel}:00`;
-      };
-
-      const getTooltipLabel = (item: HourlyMetric): string => {
-        if (!item.slot) {
-          return getAxisLabel(item);
-        }
-
-        const parsed = period === "24h" || period === "daily"
-          ? shiftSlotForward(item.slot)
-          : new Date(item.slot);
-
-        if (!parsed) {
-          return item.slot;
-        }
-
-        if (Number.isNaN(parsed.getTime())) {
-          return item.slot;
-        }
-
-        if (period === "24h" || period === "daily") {
-          return parsed.toLocaleString("pt-BR", {
-            day: "2-digit",
-            month: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-        } else {
-          return parsed.toLocaleString("pt-BR", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-          });
-        }
-      };
-
-      return [...aggregatedData]
-        .sort((a, b) => getOrderValue(a) - getOrderValue(b))
-        .slice(0, MAX_CHART_POINTS)
-        .map((item) => {
-          const relacao = Number(item.roi ?? 0);
-          // Usar a chave consistente para xKey também
-          const xKey = getConsistentKey(item, period);
-
-          return {
-            xKey,
-            axisLabel: getAxisLabel(item),
-            tooltipLabel: getTooltipLabel(item),
-            checkout: Number(item.checkout_conversion ?? 0),
-            faturamento: Number(item.revenue ?? 0),
-            gasto: Number(item.cost ?? 0),
-            relacao,
-          };
-        });
-    },
-    [aggregatedData, period],
-  );
-
-  const relacaoValores = dadosUnificados.map((d) => d.relacao);
+  const relacaoValores = dadosUnificados.flatMap((d) => [d.relacao_base, d.relacao_compare]);
   const relacaoMin = Math.min(...relacaoValores, 0);
   const relacaoMax = Math.max(...relacaoValores, 0);
   const relacaoPadding = Math.max((relacaoMax - relacaoMin) * 0.2, 0.2);
@@ -202,13 +118,87 @@ const DashboardGrafico = ({
   ];
 
   const labelsNegativos = dadosUnificados
-    .filter((d) => d.relacao < 1)
+    .filter((d) => d.relacao_base < 1)
     .map((d) => d.xKey);
 
-  const tooltipLabels = useMemo(
-    () => new Map(dadosUnificados.map((item) => [item.xKey, item.tooltipLabel])),
-    [dadosUnificados],
-  );
+  const nameByKey: Record<string, string> = {
+    checkout_base: compareLabel ? `Checkout ${compareLabel.baseDate}` : "Checkout",
+    gasto_base: compareLabel ? `Gasto ${compareLabel.baseDate}` : "Gasto",
+    faturamento_base: compareLabel ? `Faturamento ${compareLabel.baseDate}` : "Faturamento",
+    relacao_base: compareLabel ? `ROI ${compareLabel.baseDate}` : "ROI",
+    checkout_compare: compareLabel ? `Checkout ${compareLabel.compareDate}` : "Checkout comparado",
+    gasto_compare: compareLabel ? `Gasto ${compareLabel.compareDate}` : "Gasto comparado",
+    faturamento_compare: compareLabel ? `Faturamento ${compareLabel.compareDate}` : "Faturamento comparado",
+    relacao_compare: compareLabel ? `ROI ${compareLabel.compareDate}` : "ROI comparado",
+  };
+
+  const ComparisonTooltip = (props: {
+    active?: boolean;
+    payload?: Array<{ payload: Record<string, number> }>;
+    label?: string | number;
+  }) => {
+    const { active, payload, label } = props;
+    if (!active || !payload || payload.length === 0) return null;
+
+    const row = payload[0]?.payload as {
+      checkout_base: number;
+      gasto_base: number;
+      faturamento_base: number;
+      relacao_base: number;
+      checkout_compare: number;
+      gasto_compare: number;
+      faturamento_compare: number;
+      relacao_compare: number;
+    };
+
+    const hourLabel = `${String(label).padStart(2, "0")}:00`;
+
+    return (
+      <div
+        style={{
+          backgroundColor: "#0f172a",
+          border: "1px solid #334155",
+          borderRadius: "8px",
+          padding: "10px 12px",
+          minWidth: "240px",
+        }}
+      >
+        <div style={{ color: "#e2e8f0", fontWeight: 700, marginBottom: "8px" }}>
+          Hora: {hourLabel}
+        </div>
+
+        <div style={{ color: "#bfdbfe", fontSize: "12px", fontWeight: 600 }}>
+          {compareLabel ? `Base (${compareLabel.baseDate})` : "Base"}
+        </div>
+        <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Checkout: {Number(row.checkout_base || 0).toFixed(2)}%</div>
+        <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Gasto: ${Number(row.gasto_base || 0).toFixed(2)}</div>
+        <div style={{ color: "#cbd5e1", fontSize: "12px" }}>Faturamento: ${Number(row.faturamento_base || 0).toFixed(2)}</div>
+        <div style={{ color: "#cbd5e1", fontSize: "12px", marginBottom: isCompareMode ? "8px" : 0 }}>
+          ROI: {Number(row.relacao_base || 0).toFixed(2)}%
+        </div>
+
+        {isCompareMode && (
+          <>
+            <div style={{ color: "rgba(226, 232, 240, 0.75)", fontSize: "12px", fontWeight: 600 }}>
+              {compareLabel ? `Comparado (${compareLabel.compareDate})` : "Comparado"}
+            </div>
+            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+              Checkout: {Number(row.checkout_compare || 0).toFixed(2)}%
+            </div>
+            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+              Gasto: ${Number(row.gasto_compare || 0).toFixed(2)}
+            </div>
+            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+              Faturamento: ${Number(row.faturamento_compare || 0).toFixed(2)}
+            </div>
+            <div style={{ color: "rgba(203, 213, 225, 0.8)", fontSize: "12px" }}>
+              ROI: {Number(row.relacao_compare || 0).toFixed(2)}%
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="chartContainer ui-card">
@@ -218,13 +208,24 @@ const DashboardGrafico = ({
             Performance Analitica
           </h2>
           <small className="chartSubtitle">
-            {period === "24h" && "Últimas 24 horas"}
-            {period === "daily" && "Hoje"}
-            {period === "weekly" && "Esta semana"}
-            {period === "monthly" && "Este mês"}
+            {isCompareMode && compareLabel
+              ? `Comparando ${compareLabel.baseDate} vs ${compareLabel.compareDate}`
+              : period === "24h"
+                ? "Últimas 24 horas"
+                : period === "daily"
+                  ? "Hoje"
+                  : period === "weekly"
+                    ? "Esta semana"
+                    : "Este mês"}
           </small>
         </div>
         <div className="chartHeaderControls">
+          {isCompareMode && compareLabel && (
+            <>
+              <span className="compareBadge">Base: {compareLabel.baseDate}</span>
+              <span className="compareBadge compareBadge--faded">Comparado: {compareLabel.compareDate}</span>
+            </>
+          )}
           <small className="chartMeta">
             {isLoading ? "Atualizando..." : `${dadosUnificados.length} pontos`}
           </small>
@@ -239,8 +240,9 @@ const DashboardGrafico = ({
         ) : (
           <>
             <p className="chartDescription">
-              {period === "24h" && "Gasto, Faturamento e ROI Por Hora"}
-              {period === "daily" && "Gasto, Faturamento e ROI Por Hora do Dia"}
+              {isCompareMode && "Comparativo por hora com dia base e dia comparado"}
+              {!isCompareMode && period === "24h" && "Gasto, Faturamento e ROI Por Hora"}
+              {!isCompareMode && period === "daily" && "Gasto, Faturamento e ROI Por Hora do Dia"}
               {period === "weekly" && "Gasto, Faturamento e ROI Por Dia da Semana"}
               {period === "monthly" && "Gasto, Faturamento e ROI Por Dia do Mês"}
             </p>
@@ -258,10 +260,7 @@ const DashboardGrafico = ({
               />
               <XAxis
                 dataKey="xKey"
-                tickFormatter={(value) => {
-                  const entry = dadosUnificados.find((item) => item.xKey === value);
-                  return entry?.axisLabel ?? String(value);
-                }}
+                tickFormatter={(value) => `${String(value).padStart(2, "0")}:00`}
                 tick={{ fill: "#94a3b8", fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
@@ -274,63 +273,41 @@ const DashboardGrafico = ({
               />
               <YAxis yAxisId="relacao" hide domain={relacaoDomain} />
               <Tooltip
-                shared={false}
-                labelFormatter={(value) => tooltipLabels.get(String(value)) ?? String(value)}
-                contentStyle={{
-                  backgroundColor: "#0f172a",
-                  border: "1px solid #334155",
-                  borderRadius: "8px",
-                }}
-                formatter={(value, key) => {
-                  const numericValue = Array.isArray(value)
-                    ? Number(value[0] ?? 0)
-                    : Number(value ?? 0);
-
-                  if (key === "relacao") {
-                    return [`${numericValue.toFixed(2)}%`, "ROI"];
-                  }
-
-                  if (key === "gasto") {
-                    return [`$${numericValue.toFixed(2)}`, "Gasto"];
-                  }
-
-                  if (key === "checkout") {
-                    return [`${numericValue.toFixed(2)}%`, "Checkout Conversion"];
-                  }
-
-                  return [`$${numericValue.toFixed(2)}`, "Faturamento"];
-                }}
+                shared
+                content={<ComparisonTooltip />}
               />
               <Legend
                 wrapperStyle={{ fontSize: "11px", color: "#94a3b8" }}
-                formatter={(value: string) => {
-                  if (value === "checkout") return "Checkout";
-                  if (value === "gasto") return "Gasto";
-                  if (value === "faturamento") return "Faturamento";
-                  return "ROI";
-                }}
+                formatter={(value: string) => nameByKey[value] ?? value}
               />
               <Bar
                 yAxisId="valores"
-                dataKey="checkout"
+                dataKey="checkout_base"
                 fill="#f59e0b"
                 barSize={8}
                 radius={[4, 4, 0, 0]}
               />
               <Bar
                 yAxisId="valores"
-                dataKey="gasto"
+                dataKey="gasto_base"
                 fill="#ef4444"
                 barSize={8}
                 radius={[4, 4, 0, 0]}
               />
               <Bar
                 yAxisId="valores"
-                dataKey="faturamento"
+                dataKey="faturamento_base"
                 fill="#2563eb"
                 barSize={8}
                 radius={[4, 4, 0, 0]}
               />
+              {isCompareMode && (
+                <>
+                  <Bar yAxisId="valores" dataKey="checkout_compare" fill="#f59e0b" fillOpacity={0.28} barSize={8} radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="valores" dataKey="gasto_compare" fill="#ef4444" fillOpacity={0.28} barSize={8} radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="valores" dataKey="faturamento_compare" fill="#2563eb" fillOpacity={0.28} barSize={8} radius={[4, 4, 0, 0]} />
+                </>
+              )}
               {labelsNegativos.map((label) => (
                 <ReferenceLine
                   key={`neg-${label}`}
@@ -343,10 +320,10 @@ const DashboardGrafico = ({
               <Line
                 yAxisId="relacao"
                 type="monotone"
-                dataKey="relacao"
+                dataKey="relacao_base"
                 stroke="#22c55e"
                 dot={({ cx, cy, payload }) => {
-                  const isNegative = Number(payload?.relacao ?? 0) < 1;
+                  const isNegative = Number(payload?.relacao_base ?? 0) < 1;
 
                   return (
                     <circle
@@ -363,6 +340,32 @@ const DashboardGrafico = ({
                 activeDot={{ r: 5, strokeWidth: 0 }}
                 connectNulls
               />
+              {isCompareMode && (
+                <Line
+                  yAxisId="relacao"
+                  type="monotone"
+                  dataKey="relacao_compare"
+                  stroke="#22c55e"
+                  strokeOpacity={0.35}
+                  strokeDasharray="5 5"
+                  dot={({ cx, cy, payload }) => {
+                    const isNegative = Number(payload?.relacao_compare ?? 0) < 1;
+                    return (
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={3.5}
+                        fill={isNegative ? "#ef4444" : "#22c55e"}
+                        fillOpacity={0.4}
+                        stroke="transparent"
+                      />
+                    );
+                  }}
+                  strokeWidth={2}
+                  activeDot={{ r: 4, strokeWidth: 0 }}
+                  connectNulls
+                />
+              )}
             </ComposedChart>
           </ResponsiveContainer>
           </>

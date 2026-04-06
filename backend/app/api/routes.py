@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query, Path
+from datetime import date
+
+from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
@@ -10,6 +12,7 @@ from ..schemas.metrics_schema import (
     SquadSummaryItem,
     ConversionBreakdownItem,
     OfferResponse,
+    ChartComparisonResponse,
 )
 from ..services.redis_service import get_summary_cached, get_hourly_cached
 from ..services.metrics_service import (
@@ -23,6 +26,15 @@ from ..services.offer_service import sync_fetch_offer_data
 from ..services.filter_service import FilterService
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
+
+
+def _parse_iso_date(value: str | None, field_name: str) -> date | None:
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} invalido. Use YYYY-MM-DD") from exc
 
 def _get_value(obj, key, default=None):
     if isinstance(obj, dict):
@@ -232,6 +244,8 @@ def get_hourly_period(
         default=None,
         description="Filtro opcional de produto",
     ),
+    date_start: str | None = Query(default=None, description="Data inicial opcional (YYYY-MM-DD)"),
+    date_end: str | None = Query(default=None, description="Data final opcional (YYYY-MM-DD)"),
     db: Session = Depends(get_db)
 ):
     """
@@ -242,18 +256,35 @@ def get_hourly_period(
     - weekly: últimos 7 dias
     - monthly: últimos 30 dias
     """
-    filters = FilterService.build_filters(period=period, source=source, checkout=checkout, product=product)
+    filters = FilterService.build_filters(
+        period=period,
+        source=source,
+        checkout=checkout,
+        product=product,
+        date_start=date_start,
+        date_end=date_end,
+    )
+
+    parsed_start = _parse_iso_date(filters.date_start, "date_start")
+    parsed_end = _parse_iso_date(filters.date_end, "date_end")
+
+    if (parsed_start and not parsed_end) or (parsed_end and not parsed_start):
+        raise HTTPException(status_code=422, detail="Envie date_start e date_end juntos")
+
     rows = get_metrics_by_period(
         db,
         filters.period,
         filters.source,
         checkout=filters.checkout,
         product=filters.product,
+        date_start=parsed_start,
+        date_end=parsed_end,
     )
 
     data = [
         {
             "squad": str(_get_value(row, "squad", "")),
+            "metric_date": str(_get_value(row, "metric_date", "") or ""),
             "slot": str(_get_value(row, "slot", "")),
             "day": str(_get_value(row, "day", "")),
             "hour": str(_get_value(row, "hour", "")),
@@ -442,6 +473,8 @@ def get_conversion_breakdown_route(
     squad: str | None = Query(default=None, description="Filtro opcional de squad (ex.: yts, ytf)"),
     checkout: str | None = Query(default=None, description="Filtro opcional de checkout (ex.: Cartpanda, Clickbank)"),
     product: str | None = Query(default=None, description="Filtro opcional de produto"),
+    date_start: str | None = Query(default=None, description="Data inicial opcional (YYYY-MM-DD)"),
+    date_end: str | None = Query(default=None, description="Data final opcional (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
 ):
     filters = FilterService.build_filters(
@@ -449,15 +482,126 @@ def get_conversion_breakdown_route(
         squad=squad,
         checkout=checkout,
         product=product,
+        date_start=date_start,
+        date_end=date_end,
     )
+
+    parsed_start = _parse_iso_date(filters.date_start, "date_start")
+    parsed_end = _parse_iso_date(filters.date_end, "date_end")
+
+    if (parsed_start and not parsed_end) or (parsed_end and not parsed_start):
+        raise HTTPException(status_code=422, detail="Envie date_start e date_end juntos")
+
     data = get_conversion_breakdown(
         db,
         period=filters.period,
         squad=filters.squad,
         checkout=filters.checkout,
         product=filters.product,
+        date_start=parsed_start,
+        date_end=parsed_end,
     )
     return data
+
+
+@router.get(
+    "/charts/compare",
+    summary="Compara dois dias para os graficos",
+    description=(
+        "Retorna dados comparativos de graficos para duas datas especificas.\n\n"
+        "- `base_date`: data principal (YYYY-MM-DD)\n"
+        "- `compare_date`: data para comparar (YYYY-MM-DD)\n"
+        "- filtros opcionais: `source`, `checkout`, `product`"
+    ),
+    response_model=ChartComparisonResponse,
+)
+def get_charts_compare(
+    base_date: str = Query(..., description="Data base para comparacao (YYYY-MM-DD)"),
+    compare_date: str = Query(..., description="Data comparada (YYYY-MM-DD)"),
+    source: str | None = Query(default=None, description="Squad/Origem opcional"),
+    checkout: str | None = Query(default=None, description="Filtro opcional de checkout"),
+    product: str | None = Query(default=None, description="Filtro opcional de produto"),
+    db: Session = Depends(get_db),
+):
+    filters = FilterService.build_filters(
+        period="daily",
+        source=source,
+        checkout=checkout,
+        product=product,
+    )
+
+    parsed_base = _parse_iso_date(base_date, "base_date")
+    parsed_compare = _parse_iso_date(compare_date, "compare_date")
+
+    base_hourly_rows = get_metrics_by_period(
+        db,
+        period="daily",
+        source=filters.source,
+        checkout=filters.checkout,
+        product=filters.product,
+        date_start=parsed_base,
+        date_end=parsed_base,
+    )
+    compare_hourly_rows = get_metrics_by_period(
+        db,
+        period="daily",
+        source=filters.source,
+        checkout=filters.checkout,
+        product=filters.product,
+        date_start=parsed_compare,
+        date_end=parsed_compare,
+    )
+
+    def _to_hourly_payload(rows: list) -> list[dict[str, object]]:
+        return [
+            {
+                "squad": str(_get_value(row, "squad", "")),
+                "metric_date": str(_get_value(row, "metric_date", "") or ""),
+                "slot": str(_get_value(row, "slot", "")),
+                "day": str(_get_value(row, "day", "")),
+                "hour": str(_get_value(row, "hour", "")),
+                "checkout_conversion": float(_get_value(row, "checkout_conversion", 0) or 0),
+                "cost": float(_get_value(row, "cost", 0) or 0),
+                "profit": float(_get_value(row, "profit", 0) or 0),
+                "revenue": float(_get_value(row, "revenue", 0) or 0),
+                "roi": float(_get_value(row, "roi", 0) or 0) * 100,
+            }
+            for row in rows
+        ]
+
+    base_conversion = get_conversion_breakdown(
+        db,
+        period="daily",
+        squad=filters.squad,
+        checkout=filters.checkout,
+        product=filters.product,
+        date_start=parsed_base,
+        date_end=parsed_base,
+    )
+    compare_conversion = get_conversion_breakdown(
+        db,
+        period="daily",
+        squad=filters.squad,
+        checkout=filters.checkout,
+        product=filters.product,
+        date_start=parsed_compare,
+        date_end=parsed_compare,
+    )
+
+    return {
+        "base_date": parsed_base.isoformat(),
+        "compare_date": parsed_compare.isoformat(),
+        "base": {
+            "date": parsed_base.isoformat(),
+            "hourly": _to_hourly_payload(base_hourly_rows),
+            "conversion_breakdown": base_conversion,
+        },
+        "compare": {
+            "date": parsed_compare.isoformat(),
+            "hourly": _to_hourly_payload(compare_hourly_rows),
+            "conversion_breakdown": compare_conversion,
+        },
+    }
 
 
 @router.get(

@@ -555,6 +555,8 @@ def get_metrics_by_period(
     source: str = None,
     checkout: str | None = None,
     product: str | None = None,
+    date_start: date | None = None,
+    date_end: date | None = None,
 ):
     """
     Retorna métricas para um período específico.
@@ -568,9 +570,21 @@ def get_metrics_by_period(
     """
     now_sp = datetime.now(SAO_PAULO_TZ)
     sp_today = now_sp.date()
-    
+    limit_hours: int | None = None
+
+    if date_start and date_end:
+        query_start = min(date_start, date_end)
+        query_end = max(date_start, date_end)
+        limit_hours = None
+    else:
+        query_start = None
+        query_end = None
+
     # Determinar intervalo de datas conforme o período
-    if period == "24h":
+    if query_start and query_end:
+        date_start = query_start
+        date_end = query_end
+    elif period == "24h":
         date_start = sp_today - timedelta(days=1)
         date_end = sp_today
         limit_hours = 24
@@ -598,6 +612,7 @@ def get_metrics_by_period(
     
     query = f"""
         SELECT
+            timezone('America/Sao_Paulo', metric_at)::date::text as metric_date,
             to_char(date_trunc('hour', timezone('America/Sao_Paulo', metric_at)), 'YYYY-MM-DD"T"HH24:00:00') as slot,
             EXTRACT(HOUR FROM timezone('America/Sao_Paulo', metric_at))::text as hour,
             CASE
@@ -884,6 +899,8 @@ def get_conversion_breakdown(
     squad: str | None = None,
     checkout: str | None = None,
     product: str | None = None,
+    date_start: date | None = None,
+    date_end: date | None = None,
 ) -> list[dict[str, object]]:
     if not _table_exists(db, "tb_daily_conversion_entities"):
         logger.warning("⚠️ Tabela tb_daily_conversion_entities não existe")
@@ -891,12 +908,15 @@ def get_conversion_breakdown(
 
     sp_today = datetime.now(SAO_PAULO_TZ).date()
 
-    if period == "weekly":
-        date_start = sp_today - timedelta(days=6)
-        date_end = sp_today
+    if date_start and date_end:
+        range_start = min(date_start, date_end)
+        range_end = max(date_start, date_end)
+    elif period == "weekly":
+        range_start = sp_today - timedelta(days=6)
+        range_end = sp_today
     elif period == "monthly":
-        date_start = sp_today - timedelta(days=29)
-        date_end = sp_today
+        range_start = sp_today - timedelta(days=29)
+        range_end = sp_today
     else:  # 24h ou daily
         latest_query = """
             SELECT MAX(metric_date) AS latest_date
@@ -922,11 +942,11 @@ def get_conversion_breakdown(
         latest_date = getattr(latest_row, "latest_date", None) if latest_row else None
 
         reference_date = latest_date if isinstance(latest_date, date) else sp_today
-        date_start = reference_date
-        date_end = reference_date
+        range_start = reference_date
+        range_end = reference_date
 
     logger.info(f"🔍 Buscando conversion breakdown: period={period}, squad={squad}, checkout={checkout}, product={product}")
-    logger.info(f"   Data range: {date_start} a {date_end}")
+    logger.info(f"   Data range: {range_start} a {range_end}")
 
     query = """
         SELECT
@@ -956,13 +976,15 @@ def get_conversion_breakdown(
     rows = db.execute(
         text(query),
         {
-            "date_start": date_start,
-            "date_end": date_end,
+            "date_start": range_start,
+            "date_end": range_end,
             "squad": squad,
             "checkout": checkout,
             "product": product,
         },
     ).fetchall()
+
+    metric_date_marker = str(range_start) if range_start == range_end else None
 
     logger.info(f"   Resultados da query: {len(rows)} linhas retornadas")
 
@@ -977,6 +999,7 @@ def get_conversion_breakdown(
 
         normalized.append(
             {
+                "metric_date": metric_date_marker,
                 "squad": str(row.squad or "unknown"),
                 "checkout": str(row.checkout or "unknown"),
                 "product": product_value,
