@@ -506,11 +506,14 @@ def get_conversion_breakdown_route(
 
 @router.get(
     "/charts/compare",
-    summary="Compara dois dias para os graficos",
+    summary="Compara dois períodos para os gráficos",
     description=(
-        "Retorna dados comparativos de graficos para duas datas especificas.\n\n"
-        "- `base_date`: data principal (YYYY-MM-DD)\n"
+        "Retorna dados comparativos de gráficos para dois períodos.\n\n"
+        "- Para `period` em ['24h', 'daily']: use `base_date` e `compare_date` (YYYY-MM-DD)\n"
+        "- Para `period` em ['weekly', 'monthly']: periodo comparará automaticamente períodos anteriores\n"
+        "- `base_date`: data base para comparação ou período atual (YYYY-MM-DD)\n"
         "- `compare_date`: data para comparar (YYYY-MM-DD)\n"
+        "- `period`: período para a comparação (24h, daily, weekly, monthly)\n"
         "- filtros opcionais: `source`, `checkout`, `product`"
     ),
     response_model=ChartComparisonResponse,
@@ -518,13 +521,14 @@ def get_conversion_breakdown_route(
 def get_charts_compare(
     base_date: str = Query(..., description="Data base para comparacao (YYYY-MM-DD)"),
     compare_date: str = Query(..., description="Data comparada (YYYY-MM-DD)"),
+    period: str = Query(default="daily", description="Período: 24h, daily, weekly, ou monthly"),
     source: str | None = Query(default=None, description="Squad/Origem opcional"),
     checkout: str | None = Query(default=None, description="Filtro opcional de checkout"),
     product: str | None = Query(default=None, description="Filtro opcional de produto"),
     db: Session = Depends(get_db),
 ):
     filters = FilterService.build_filters(
-        period="daily",
+        period=period,
         source=source,
         checkout=checkout,
         product=product,
@@ -535,7 +539,7 @@ def get_charts_compare(
 
     base_hourly_rows = get_metrics_by_period(
         db,
-        period="daily",
+        period=period,
         source=filters.source,
         checkout=filters.checkout,
         product=filters.product,
@@ -544,7 +548,7 @@ def get_charts_compare(
     )
     compare_hourly_rows = get_metrics_by_period(
         db,
-        period="daily",
+        period=period,
         source=filters.source,
         checkout=filters.checkout,
         product=filters.product,
@@ -571,7 +575,7 @@ def get_charts_compare(
 
     base_conversion = get_conversion_breakdown(
         db,
-        period="daily",
+        period=period,
         squad=filters.squad,
         checkout=filters.checkout,
         product=filters.product,
@@ -580,7 +584,7 @@ def get_charts_compare(
     )
     compare_conversion = get_conversion_breakdown(
         db,
-        period="daily",
+        period=period,
         squad=filters.squad,
         checkout=filters.checkout,
         product=filters.product,

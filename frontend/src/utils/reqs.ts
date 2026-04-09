@@ -222,11 +222,13 @@ export const fetchConversionBreakdown = (
 export const fetchChartsCompare = (
   baseDate: string,
   compareDate: string,
+  period?: string,
   squad?: string,
   checkout?: string,
   product?: string,
 ): Promise<ChartComparisonResponse> => {
   let path = `/metrics/charts/compare?base_date=${encodeURIComponent(baseDate)}&compare_date=${encodeURIComponent(compareDate)}`;
+  if (period) path += `&period=${encodeURIComponent(period)}`;
   if (squad && squad !== DEFAULT_SQUAD) path += `&source=${encodeURIComponent(squad)}`;
   if (checkout && checkout !== DEFAULT_SQUAD) path += `&checkout=${encodeURIComponent(checkout)}`;
   if (product && product !== DEFAULT_SQUAD) path += `&product=${encodeURIComponent(product)}`;

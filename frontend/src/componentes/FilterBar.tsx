@@ -214,31 +214,31 @@ export const FilterBar: React.FC<FilterBarProps> = ({
              />
            </div>
 
-           <div className="filterBar__group">
-             <label htmlFor="compare-base-date" className="filterBar__label">
-               Dia base
-             </label>
-             <input
-               id="compare-base-date"
-               type="date"
-               value={chartComparison.base_date}
-               onChange={handleBaseDateChange}
-               className="filterBar__input"
-             />
-           </div>
+            <div className="filterBar__group">
+              <label htmlFor="compare-base-date" className="filterBar__label">
+                {filters.period === "24h" || filters.period === "daily" ? "Dia base" : "Período base"}
+              </label>
+              <input
+                id="compare-base-date"
+                type="date"
+                value={chartComparison.base_date}
+                onChange={handleBaseDateChange}
+                className="filterBar__input"
+              />
+            </div>
 
-           <div className="filterBar__group">
-             <label htmlFor="compare-target-date" className="filterBar__label">
-               Comparar com
-             </label>
-             <input
-               id="compare-target-date"
-               type="date"
-               value={chartComparison.compare_date}
-               onChange={handleCompareDateChange}
-               className="filterBar__input"
-             />
-           </div>
+            <div className="filterBar__group">
+              <label htmlFor="compare-target-date" className="filterBar__label">
+                {filters.period === "24h" || filters.period === "daily" ? "Comparar com" : "Comparar período"}
+              </label>
+              <input
+                id="compare-target-date"
+                type="date"
+                value={chartComparison.compare_date}
+                onChange={handleCompareDateChange}
+                className="filterBar__input"
+              />
+            </div>
          </div>
 
          {/* Linha 2: Filtros avançados (opcional) */}

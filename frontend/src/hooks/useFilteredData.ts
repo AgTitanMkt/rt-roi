@@ -175,14 +175,15 @@ export const useFilteredData = ({
           if (requestId === requestIdRef.current) setConversionBreakdown([]);
         });
 
-      const chartComparisonPromise = chartComparison.enabled
-        ? fetchChartsCompare(
-            chartComparison.base_date,
-            chartComparison.compare_date,
-            params.source,
-            params.checkout,
-            params.product,
-          )
+       const chartComparisonPromise = chartComparison.enabled
+         ? fetchChartsCompare(
+             chartComparison.base_date,
+             chartComparison.compare_date,
+             params.period,
+             params.source,
+             params.checkout,
+             params.product,
+           )
             .then((payload) => {
               if (requestId === requestIdRef.current) {
                 setChartComparisonData({
