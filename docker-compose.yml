@@ -1,6 +1,6 @@
 networks:
   titan_network:
-    driver: bridge
+    external: true
 
 services:
   frontend:
@@ -107,4 +107,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-

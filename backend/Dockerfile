@@ -1,27 +1,18 @@
-FROM python:3.11-slim
-
-# Evita cache e melhora logs
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Instalar netcat para health checks
-RUN apt-get update && apt-get install -y netcat-openbsd && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# Copy requirements first for Docker layer caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
 COPY . .
+RUN npm run build
 
-# Copy entrypoint script
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+FROM nginx:1.27-alpine
 
-# Expose port
-EXPOSE 8000
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
 
-# Run with entrypoint script (sem changear user para que possa conectar ao DB durante init)
-ENTRYPOINT ["./entrypoint.sh"]
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
