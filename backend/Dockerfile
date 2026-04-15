@@ -1,18 +1,24 @@
-FROM node:20-alpine AS build
+FROM python:3.11-slim
+
+# Evita cache e melhora logs
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+# Copy requirements first for Docker layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application code
 COPY . .
-RUN npm run build
 
-FROM nginx:1.27-alpine
+# Create non-root user
+RUN useradd -m -r appuser && chown -R appuser:appuser /app
+USER appuser
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+# Expose port
+EXPOSE 8000
 
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
+# Run with uvicorn (production)
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--timeout-keep-alive", "120"]
