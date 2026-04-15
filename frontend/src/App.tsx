@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import "./App.css";
+import Header from "./components/Header";
 import ValorCard from "./componentes/ValorCard.tsx";
 import DashboardGrafico1 from "./componentes/DashboardGrafico1.tsx";
 import ConversionInsightsChart from "./componentes/ConversionInsightsChart.tsx";
@@ -108,6 +109,8 @@ function App() {
 
   return (
     <div className="dashboardShell">
+      <Header />
+
       <header className="dashboardHeader">
         <div>
           <h1 className="dashboardTitle">Dashboard de Performance</h1>

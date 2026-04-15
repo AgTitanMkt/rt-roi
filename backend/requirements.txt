@@ -15,3 +15,7 @@ pydantic-settings
 python-dotenv
 
 orjson
+
+PyJWT
+bcrypt
+python-multipart

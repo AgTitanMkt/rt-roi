@@ -134,6 +134,7 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   try {
     const response = await fetch(fullUrl, {
       cache: "no-store",
+      credentials: 'include',  // Incluir cookies para autenticação
       headers: {
         "Cache-Control": "no-cache",
         Pragma: "no-cache",

@@ -96,3 +96,22 @@ class ChartComparisonResponse(BaseModel):
     base: ChartComparisonSeries = Field(..., description="Dados da data base")
     compare: ChartComparisonSeries = Field(..., description="Dados da data comparada")
 
+
+# ✅ Auth Schemas
+class TokenRequest(BaseModel):
+    """Requisição de login"""
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """Resposta com token JWT"""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int  # em segundos
+
+
+class TokenPayload(BaseModel):
+    """Payload do JWT"""
+    username: str
+    role: str = "admin"

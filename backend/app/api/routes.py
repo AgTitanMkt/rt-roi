@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Path, HTTPException
+from fastapi import APIRouter, Depends, Query, Path, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
@@ -13,6 +13,8 @@ from ..schemas.metrics_schema import (
     ConversionBreakdownItem,
     OfferResponse,
     ChartComparisonResponse,
+    TokenRequest,
+    TokenResponse,
 )
 from ..services.redis_service import get_summary_cached, get_hourly_cached
 from ..services.metrics_service import (
@@ -24,8 +26,13 @@ from ..services.metrics_service import (
 )
 from ..services.offer_service import sync_fetch_offer_data
 from ..services.filter_service import FilterService
+from ..services.auth_service import AuthService
+from ..core.auth_middleware import get_current_user
 
-router = APIRouter(prefix="/metrics", tags=["metrics"])
+# Routers
+router = APIRouter()
+metrics_router = APIRouter(prefix="/metrics", tags=["metrics"])
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _parse_iso_date(value: str | None, field_name: str) -> date | None:
@@ -55,7 +62,7 @@ def get_db():
     finally:
         db.close()
 
-@router.get(
+@metrics_router.get(
     "/summary",
     summary="Retorna KPIs agregados",
     description=(
@@ -144,7 +151,7 @@ def get_summary(
 
     return summary_data
 
-@router.get(
+@metrics_router.get(
     "/hourly",
     summary="Retorna métricas por hora",
     description=(
@@ -214,7 +221,7 @@ def get_hourly(
 
     return data
 
-@router.get(
+@metrics_router.get(
     "/hourly/period",
     summary="Retorna métricas por período",
     description=(
@@ -300,7 +307,7 @@ def get_hourly_period(
     return data
 
 
-@router.get(
+@metrics_router.get(
     "/by-checkout",
             response_model=list[CheckoutSummaryItem],
     summary="Retorna conversão por checkout (Cartpanda, Clickbank)",
@@ -354,7 +361,7 @@ def get_by_checkout(
     return data
 
 
-@router.get(
+@metrics_router.get(
     "/by-product",
             response_model=list[ProductSummaryItem],
     summary="Retorna conversão por produto",
@@ -408,7 +415,7 @@ def get_by_product(
     return data
 
 
-@router.get(
+@metrics_router.get(
     "/by-squad",
             response_model=list[SquadSummaryItem],
     summary="Retorna métricas por squad",
@@ -452,7 +459,7 @@ def get_by_squad(
     return data
 
 
-@router.get(
+@metrics_router.get(
     "/conversion-breakdown",
     summary="Retorna conversão por combinação de squad, checkout e produto",
     description=(
@@ -504,7 +511,7 @@ def get_conversion_breakdown_route(
     return data
 
 
-@router.get(
+@metrics_router.get(
     "/charts/compare",
     summary="Compara dois períodos para os gráficos",
     description=(
@@ -608,7 +615,7 @@ def get_charts_compare(
     }
 
 
-@router.get(
+@metrics_router.get(
     "/cartpanda/offer/{offer_id}",
     summary="Busca dados de uma oferta Cartpanda",
     description=(
@@ -682,3 +689,36 @@ def get_cartpanda_offer(
         "status": "found",
         "data": offer_data
     }
+
+# ✅ ROTA DE LOGIN (pública - sem proteção)
+@auth_router.post("/login", response_model=TokenResponse)
+async def login(credentials: TokenRequest):
+    """
+    Endpoint de login
+
+    Valida credenciais do usuário admin e retorna um token JWT válido por 72 horas.
+
+    **Credenciais de teste:**
+    - Username: Admin
+    - Password: #agenciatitan2026
+    """
+    # Verifica credenciais
+    if not AuthService.verify_credentials(credentials.username, credentials.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuário ou senha inválidos",
+        )
+
+    # Gera token
+    token, expires_in = AuthService.create_access_token(credentials.username)
+
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_in=expires_in
+    )
+
+
+# ✅ Adicionar rotas de autenticação ao router principal
+router.include_router(auth_router)
+router.include_router(metrics_router)

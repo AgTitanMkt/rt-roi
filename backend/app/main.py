@@ -1,25 +1,29 @@
 from fastapi import FastAPI
-# from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from .core.database import engine
-from .api.routes import router as metrics_router
+from .api.routes import router
 
 app = FastAPI()
 
-# CORS Configuration - Allow only specific domain
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=[
-#         "http://187.124.91.100",
-#         "https://187.124.91.100",
-#     ],
-#     allow_credentials=True,
-#     allow_methods=["GET", "OPTIONS"],
-#     allow_headers=["*"],
-#     max_age=3600,  # Cache CORS preflight for 1 hour
-# )
+# CORS Configuration - Allow frontend and local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev server
+        "http://localhost:3000",      # Production frontend
+        "http://127.0.0.1:5173",      # Local testing
+        "http://127.0.0.1:3000",      # Local testing
+        "http://187.124.91.100",      # Production domain
+        "https://187.124.91.100",     # Production domain (HTTPS)
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
+    max_age=3600,  # Cache CORS preflight for 1 hour
+)
 
-app.include_router(metrics_router)
+app.include_router(router)
 
 @app.get("/")
 def get_root():
