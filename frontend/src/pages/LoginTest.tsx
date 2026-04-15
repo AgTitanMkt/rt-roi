@@ -375,7 +375,7 @@ export default function LoginTest() {
                     <span className="result-time">{result.timestamp}</span>
                   </div>
 
-                  {result.response && (
+                  {result.response !== null && result.response !== undefined && (
                     <details className="result-details">
                       <summary>Ver Resposta</summary>
                       <pre>{JSON.stringify(result.response, null, 2)}</pre>
