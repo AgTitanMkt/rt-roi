@@ -6,6 +6,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# Instalar netcat para health checks
+RUN apt-get update && apt-get install -y netcat-openbsd && rm -rf /var/lib/apt/lists/*
+
 # Copy requirements first for Docker layer caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

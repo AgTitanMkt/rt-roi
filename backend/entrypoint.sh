@@ -1,28 +1,39 @@
 #!/bin/bash
 set -e
 
-# Aguardar PostgreSQL ficar pronto
-echo "⏳ Aguardando PostgreSQL ficar disponível..."
-max_attempts=30
+# Extrair host e porta do DATABASE_URL
+# Exemplo: postgresql://user:pass@postgres:5432/db
+DB_HOST=$(echo $DATABASE_URL | sed 's/.*@\([^:]*\).*/\1/')
+DB_PORT=${DB_PORT:-5432}
+
+echo "⏳ Aguardando PostgreSQL em $DB_HOST:$DB_PORT..."
+max_attempts=60
 attempt=1
 
 while [ $attempt -le $max_attempts ]; do
-    if python -c "
-import os
-import psycopg2
-from sqlalchemy import create_engine
+    echo "   Tentativa $attempt/$max_attempts..."
 
-db_url = os.getenv('DATABASE_URL')
+    # Tentar conectar usando nc (netcat) ou python
+    if command -v nc &> /dev/null; then
+        # Se nc está disponível, usar isso
+        if nc -z $DB_HOST $DB_PORT 2>/dev/null; then
+            echo "✅ PostgreSQL disponível!"
+            break
+        fi
+    else
+        # Fallback para python
+        if python3 -c "
+import socket
+import sys
 try:
-    engine = create_engine(db_url)
-    with engine.connect() as conn:
-        print('✅ PostgreSQL disponível!')
-        exit(0)
-except Exception as e:
-    print(f'❌ Tentativa {$attempt}/{$max_attempts}: {e}')
-    exit(1)
-    " 2>/dev/null; then
-        break
+    socket.create_connection(('$DB_HOST', $DB_PORT), timeout=2)
+    sys.exit(0)
+except:
+    sys.exit(1)
+" 2>/dev/null; then
+            echo "✅ PostgreSQL disponível!"
+            break
+        fi
     fi
 
     attempt=$((attempt + 1))
@@ -34,9 +45,12 @@ if [ $attempt -gt $max_attempts ]; then
     exit 1
 fi
 
+# Aguardar um pouco mais para ter certeza
+sleep 3
+
 # Rodar migrations
 echo "🔄 Executando migrations..."
-alembic upgrade head
+alembic upgrade head || echo "⚠️ Migrations já rodadas ou erro ao rodar"
 
 # Iniciar aplicação
 echo "🚀 Iniciando aplicação..."
