@@ -4,7 +4,8 @@
  */
 import Cookies from 'js-cookie';
 
-const API_BASE_URL = 'http://localhost:8000';
+// Usar /api como base (será proxified pelo nginx) ou VITE_API_BASE_URL se configurado
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 const TOKEN_STORAGE_KEY = 'auth_token';
 const TOKEN_COOKIE_NAME = 'auth_token';
 const TOKEN_EXPIRATION_DAYS = 3;
