@@ -12,7 +12,7 @@ interface LoginTestState {
   username: string;
   password: string;
   isLoading: boolean;
-  response: any;
+  response: unknown;
   error: string;
   token?: string;
   testResults: TestResult[];
@@ -22,7 +22,7 @@ interface TestResult {
   id: string;
   name: string;
   status: 'pending' | 'success' | 'error';
-  response?: any;
+  response?: unknown;
   error?: string;
   timestamp: string;
 }

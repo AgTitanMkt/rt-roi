@@ -179,7 +179,6 @@ const DashboardGrafico = ({
   const isHourly = period === "24h" || period === "daily";
   const itemsCount = isHourly ? HOURS_PER_DAY : (period === "weekly" ? DAYS_PER_WEEK : DAYS_PER_MONTH);
 
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const dadosUnificados = useMemo(() => {
     const baseByKey = aggregateByTimeKey(hourlyData, period);
     const compareByKey = aggregateByTimeKey(comparedHourlyData, period);

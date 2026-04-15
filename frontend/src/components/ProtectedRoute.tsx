@@ -2,7 +2,7 @@
  * Componente para proteger rotas que requerem autenticação
  * Redireciona para login se o usuário não tiver token válido
  */
-import { useEffect, useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
 import { isAuthenticated, getToken } from '../services/authService';
 
@@ -11,8 +11,6 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const [isChecking, setIsChecking] = useState(true);
-
   // Memoize para evitar re-renders desnecessários
   const authenticated = useMemo(() => {
     const token = getToken();
@@ -31,16 +29,6 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     return isAuth;
   }, []);
 
-  useEffect(() => {
-    setIsChecking(false);
-  }, []);
-
-  // Enquanto verifica, mostrar loading
-  if (isChecking) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <div>Verificando autenticação...</div>
-    </div>;
-  }
 
   // Se não autenticado, redirecionar
   if (!authenticated) {
