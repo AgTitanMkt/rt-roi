@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getAuthHeader } from "../services/authService";
 
 // Support both relative path (/api) for Docker/local and absolute URL for VPS
 const API_BASE =  "/api";
@@ -136,6 +137,7 @@ const fetchJson = async <T>(path: string): Promise<T> => {
       cache: "no-store",
       credentials: 'include',  // Incluir cookies para autenticação
       headers: {
+        ...getAuthHeader(),
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
       },

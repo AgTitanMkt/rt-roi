@@ -2,6 +2,7 @@ import React from "react";
 import { useFilters } from "../context/useFilters";
 import type { Filters } from "../context/filterContextTypes";
 import { PERIOD_OPTIONS, SQUAD_OPTIONS, CHECKOUT_OPTIONS, PRODUCT_OPTIONS } from "../utils/filterOptions";
+import { isAdmin } from "../services/authService";
 import "./FilterBar.css";
 
 
@@ -21,6 +22,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onFiltersChange,
 }) => {
   const { filters, updateFilter, resetFilters, chartComparison, updateChartComparison, resetChartComparison } = useFilters();
+  const canUseSquadFilter = isAdmin();
 
   const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const period = e.target.value as Filters["period"];
@@ -29,6 +31,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   };
 
   const handleSquadChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    if (!canUseSquadFilter) return;
     const squad = e.target.value || undefined;
     updateFilter("squad", squad);
     onFiltersChange?.({ ...filters, squad });
@@ -93,7 +96,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </select>
         </div>
 
-        <div className="filterBar__group">
+        {canUseSquadFilter && <div className="filterBar__group">
           <label htmlFor="squad-select" className="filterBar__label">
             Squad:
           </label>
@@ -109,7 +112,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               </option>
             ))}
           </select>
-        </div>
+        </div>}
 
         <button onClick={handleReset} className="filterBar__reset">
           Limpar
@@ -141,7 +144,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             </select>
           </div>
 
-          <div className="filterBar__group">
+          {canUseSquadFilter && <div className="filterBar__group">
             <label htmlFor="squad-select" className="filterBar__label">
               Squad
             </label>
@@ -157,7 +160,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 </option>
               ))}
             </select>
-          </div>
+          </div>}
 
            <div className="filterBar__group">
              <label htmlFor="checkout-select" className="filterBar__label">

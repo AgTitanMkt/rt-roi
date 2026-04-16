@@ -12,6 +12,7 @@ import {
   checkBackendHealth,
 } from "../utils/reqs";
 import { normalizeSquadFilter } from "../utils/squadMapping";
+import { isAdmin } from "../services/authService";
 import type {
   SummaryResponse,
   HourlyMetric,
@@ -159,13 +160,17 @@ export const useFilteredData = ({
           if (requestId === requestIdRef.current) setProducts([]);
         });
 
-      const squadsPromise = fetchSquadMetrics(params.period)
-        .then((value) => {
-          if (requestId === requestIdRef.current) setSquads(value);
-        })
-        .catch(() => {
-          if (requestId === requestIdRef.current) setSquads([]);
-        });
+      const squadsPromise = isAdmin()
+        ? fetchSquadMetrics(params.period)
+            .then((value) => {
+              if (requestId === requestIdRef.current) setSquads(value);
+            })
+            .catch(() => {
+              if (requestId === requestIdRef.current) setSquads([]);
+            })
+        : Promise.resolve().then(() => {
+            if (requestId === requestIdRef.current) setSquads([]);
+          });
 
       const breakdownPromise = fetchConversionBreakdown(params.period, params.squad, params.checkout, params.product)
         .then((value) => {

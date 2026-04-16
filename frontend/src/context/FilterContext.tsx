@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import type { ChartComparisonFilters, Filters, FilterContextType } from "./filterContextTypes";
 import { FilterContext } from "./filterContextObject";
 import { normalizeSquadFilter } from "../utils/squadMapping";
+import { isAdmin } from "../services/authService";
 
 /**
  * FilterProvider: Provider para o contexto de filtros
@@ -39,12 +40,13 @@ const DEFAULT_CHART_COMPARISON: ChartComparisonFilters = {
 
 export const FilterProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const urlParams = new URLSearchParams(window.location.search);
+  const canUseSquadFilter = isAdmin();
 
   const [filters, setFiltersState] = useState<Filters>(() => {
     // Recuperar filtros da URL ao carregar
     return {
       period: (urlParams.get("period") as Filters["period"]) || DEFAULT_FILTERS.period,
-      squad: normalizeSquadFilter(urlParams.get("squad") || undefined),
+      squad: canUseSquadFilter ? normalizeSquadFilter(urlParams.get("squad") || undefined) : undefined,
       checkout: urlParams.get("checkout") || undefined,
       product: urlParams.get("product") || undefined,
       offer: urlParams.get("offer") || undefined,
@@ -89,12 +91,15 @@ export const FilterProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const updateFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
+    if (key === "squad" && !canUseSquadFilter) {
+      return;
+    }
     const nextValue = key === "squad" ? normalizeSquadFilter(value as string | undefined) : value;
     setFiltersState((prev) => ({
       ...prev,
       [key]: nextValue,
     }));
-  }, []);
+  }, [canUseSquadFilter]);
 
   const updateChartComparison = useCallback(
     <K extends keyof ChartComparisonFilters>(key: K, value: ChartComparisonFilters[K]) => {

@@ -1,12 +1,13 @@
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, date
-from typing import TypedDict
+from typing import TypedDict, cast
 from zoneinfo import ZoneInfo
 import logging
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from ..models.metrics import DailySummary, HourlyMetric
+from ..core.user_scope import resolve_user_squad_scope
 from .redtrack.mappings import resolve_product, resolve_squad, resolve_checkout, normalize_mapping_token
 from .redtrack.settings import SQUAD_MAPPINGS
 
@@ -18,6 +19,13 @@ SAO_PAULO_TZ = ZoneInfo("America/Sao_Paulo")
 
 def _product_token(value: str | None) -> str:
     return normalize_mapping_token(value)
+
+
+def _as_int(value, default: int = 0) -> int:
+    try:
+        return int(value if value is not None else default)
+    except (TypeError, ValueError):
+        return default
 
 
 def _roi_percent(value) -> Decimal:
@@ -51,6 +59,21 @@ ALLOWED_SQUADS = {
     for entry in SQUAD_MAPPINGS
     if str(entry.get("value") or "").strip()
 }
+
+
+def _build_squad_scope_clause(source: str | None, column_name: str = "squad", param_name: str = "source") -> tuple[str, dict[str, object]]:
+    scope = normalize_mapping_token(source)
+    if not scope:
+        return "", {}
+
+    squads = resolve_user_squad_scope(scope)
+    if squads:
+        placeholders = ", ".join(f":{param_name}_{idx}" for idx in range(len(squads)))
+        clause = f" AND UPPER({column_name}) IN ({placeholders})"
+        params = {f"{param_name}_{idx}": squad for idx, squad in enumerate(squads)}
+        return clause, params
+
+    return f" AND UPPER({column_name}) = UPPER(:{param_name})", {param_name: source}
 
 
 def _normalize_dimension_value(raw: str | None, resolved: str | None) -> str:
@@ -249,11 +272,13 @@ def insert_metrics(db: Session, data: list):
         previous_campaign_ids = list({campaign_id for campaign_id, _ in previous_targets})
         previous_metric_ats = list({metric_at for _, metric_at in previous_targets})
         previous_rows = db.query(HourlyMetric).filter(
-            HourlyMetric.campaign_id.in_(previous_campaign_ids),
-            HourlyMetric.metric_at.in_(previous_metric_ats),
+            HourlyMetric.campaign_id.in_(previous_campaign_ids),  # type: ignore[attr-defined]
+            HourlyMetric.metric_at.in_(previous_metric_ats),  # type: ignore[attr-defined]
         ).all()
         for row in previous_rows:
-            previous_by_key[(row.campaign_id, row.metric_at)] = row
+            if row.metric_at is None:
+                continue
+            previous_by_key[(str(row.campaign_id), row.metric_at)] = cast(HourlyMetric, row)
 
     for key, item in unique_payload.items():
         metric_at = item["metric_at"]
@@ -289,10 +314,14 @@ def insert_metrics(db: Session, data: list):
     metric_ats = list({k[1] for k in unique_payload})
 
     existing_rows = db.query(HourlyMetric).filter(
-        HourlyMetric.campaign_id.in_(campaign_ids),
-        HourlyMetric.metric_at.in_(metric_ats),
+        HourlyMetric.campaign_id.in_(campaign_ids),  # type: ignore[attr-defined]
+        HourlyMetric.metric_at.in_(metric_ats),  # type: ignore[attr-defined]
     ).all()
-    existing_by_key = {(row.campaign_id, row.metric_at): row for row in existing_rows}
+    existing_by_key: dict[tuple[str, datetime], HourlyMetric] = {}
+    for row in existing_rows:
+        if row.metric_at is None:
+            continue
+        existing_by_key[(str(row.campaign_id), row.metric_at)] = cast(HourlyMetric, row)
 
     inserted = 0
     updated = 0
@@ -355,17 +384,19 @@ def get_summary(
     sp_today = datetime.now(SAO_PAULO_TZ).date()
 
     use_hourly_for_summary = bool(checkout or product)
+    squad_clause, squad_params = _build_squad_scope_clause(source)
 
     # Sem filtros de checkout/produto, usa o snapshot diário mais recente disponível.
     if not use_hourly_for_summary:
         latest_date_query = """
             SELECT MAX(metric_date) AS latest_date
             FROM tb_daily_metrics_summary
+            WHERE 1=1
         """
         latest_params: dict[str, object] = {}
-        if source:
-            latest_date_query += " WHERE UPPER(squad) = UPPER(:source)"
-            latest_params["source"] = source
+        if squad_clause:
+            latest_date_query += squad_clause
+            latest_params.update(squad_params)
 
         latest_row = db.execute(text(latest_date_query), latest_params).fetchone()
         latest_daily_date_raw = getattr(latest_row, "latest_date", None) if latest_row else None
@@ -403,7 +434,7 @@ def get_summary(
                     ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 4) as roi
                 FROM tb_hourly_metrics
                 WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :start_date AND :end_date
-                  AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+                  {squad_clause}
                   AND (:checkout IS NULL OR UPPER(checkout_type) = UPPER(:checkout))
                   AND (
                     :product IS NULL
@@ -418,6 +449,8 @@ def get_summary(
                 "checkout": checkout,
                 "product": product,
             }
+            params.update(squad_params)
+            query = query.replace("{squad_clause}", squad_clause)
             return db.execute(text(query), params).fetchone()
 
         query = """
@@ -436,9 +469,9 @@ def get_summary(
             "end_date": end_date,
         }
 
-        if source:
-            query += " AND UPPER(squad) = UPPER(:source)"
-            params["source"] = source
+        if squad_clause:
+            query += squad_clause
+            params.update(squad_params)
 
         return db.execute(text(query), params).fetchone()
 
@@ -505,6 +538,7 @@ def get_metrics_by_hour(db: Session, source: str = None):
     now_sp = datetime.now(SAO_PAULO_TZ)
     sp_today = now_sp.date()
     sp_yesterday = sp_today - timedelta(days=1)
+    squad_clause, squad_params = _build_squad_scope_clause(source)
 
     query = """
         WITH hourly AS (
@@ -523,7 +557,7 @@ def get_metrics_by_hour(db: Session, source: str = None):
                 ROUND(SUM(profit) / NULLIF(SUM(cost), 0), 2) as roi
             FROM tb_hourly_metrics
             WHERE timezone('America/Sao_Paulo', metric_at)::date IN (:sp_today, :sp_yesterday)
-              AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+              {squad_clause}
             GROUP BY
                 date_trunc('hour', timezone('America/Sao_Paulo', metric_at)),
                 timezone('America/Sao_Paulo', metric_at)::date,
@@ -544,6 +578,9 @@ def get_metrics_by_hour(db: Session, source: str = None):
         "sp_yesterday": sp_yesterday,
         "source": source,
     }
+    params.update(squad_params)
+
+    query = query.replace("{squad_clause}", squad_clause)
 
     result = db.execute(text(query), params)
     return result.fetchall()
@@ -571,6 +608,7 @@ def get_metrics_by_period(
     now_sp = datetime.now(SAO_PAULO_TZ)
     sp_today = now_sp.date()
     limit_hours: int | None = None
+    squad_clause, squad_params = _build_squad_scope_clause(source)
 
     if date_start and date_end:
         query_start = min(date_start, date_end)
@@ -633,7 +671,7 @@ def get_metrics_by_period(
                 CASE WHEN :source IS NULL THEN NULL::text ELSE :source END as squad
             FROM tb_hourly_metrics
             WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :date_start AND :date_end
-              AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+              {squad_clause}
               AND (:checkout IS NULL OR UPPER(checkout_type) = UPPER(:checkout))
               AND (
                 :product IS NULL
@@ -667,7 +705,7 @@ def get_metrics_by_period(
                 CASE WHEN :source IS NULL THEN NULL::text ELSE :source END as squad
             FROM tb_hourly_metrics
             WHERE timezone('America/Sao_Paulo', metric_at)::date BETWEEN :date_start AND :date_end
-              AND (:source IS NULL OR UPPER(squad) = UPPER(:source))
+              {squad_clause}
               AND (:checkout IS NULL OR UPPER(checkout_type) = UPPER(:checkout))
               AND (
                 :product IS NULL
@@ -688,7 +726,8 @@ def get_metrics_by_period(
         "checkout": checkout,
         "product": product,
     }
-    
+    params.update(squad_params)
+
     result = db.execute(text(query), params)
     rows = result.fetchall()
     
@@ -714,7 +753,9 @@ def get_checkout_summary(db: Session, squad: str = None, period: str = "24h"):
     else:  # 24h ou daily
         date_start = sp_today
         date_end = sp_today
-    
+
+    squad_clause, squad_params = _build_squad_scope_clause(squad)
+
     query = """
         SELECT
             checkout,
@@ -734,9 +775,9 @@ def get_checkout_summary(db: Session, squad: str = None, period: str = "24h"):
         "date_end": date_end,
     }
     
-    if squad:
-        query += " AND UPPER(squad) = UPPER(:squad)"
-        params["squad"] = squad
+    if squad_clause:
+        query += squad_clause
+        params.update(squad_params)
     else:
         query += " AND squad = 'ALL'"
 
@@ -760,11 +801,8 @@ def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
     """
     Retorna métricas de conversão por produto.
     """
-    if not _table_exists(db, "tb_daily_product_summary"):
-        return []
-
     sp_today = datetime.now(SAO_PAULO_TZ).date()
-    
+
     if period == "weekly":
         date_start = sp_today - timedelta(days=6)
         date_end = sp_today
@@ -774,38 +812,68 @@ def get_product_summary(db: Session, squad: str = None, period: str = "24h"):
     else:  # 24h ou daily
         date_start = sp_today
         date_end = sp_today
-    
-    query = """
-        SELECT
-            product,
-            SUM(initiate_checkout) as initiate_checkout,
-            SUM(purchase) as purchase,
-            CASE 
-                WHEN SUM(initiate_checkout) > 0 
-                THEN ROUND((SUM(purchase)::numeric / SUM(initiate_checkout)) * 100, 2)
-                ELSE 0 
-            END as checkout_conversion
-        FROM tb_daily_product_summary
-        WHERE metric_date BETWEEN :date_start AND :date_end
-    """
-    
-    params: dict[str, object] = {
-        "date_start": date_start,
-        "date_end": date_end,
-    }
-    
-    if squad:
-        query += " AND UPPER(squad) = UPPER(:squad)"
-        params["squad"] = squad
-    else:
-        query += " AND squad = 'ALL'"
 
-    query += " GROUP BY product ORDER BY checkout_conversion DESC"
-    
-    result = db.execute(text(query), params)
-    rows = result.fetchall()
-    
-    # Consolida aliases no mesmo produto canônico para resposta consistente.
+    squad_clause, squad_params = _build_squad_scope_clause(squad)
+
+    if squad:
+        if not _table_exists(db, "tb_daily_conversion_entities"):
+            return []
+
+        query = """
+            SELECT
+                product,
+                SUM(initiate_checkout) as initiate_checkout,
+                SUM(purchase) as purchase,
+                CASE
+                    WHEN SUM(initiate_checkout) > 0
+                    THEN ROUND((SUM(purchase)::numeric / SUM(initiate_checkout)) * 100, 2)
+                    ELSE 0
+                END as checkout_conversion
+            FROM tb_daily_conversion_entities
+            WHERE metric_date BETWEEN :date_start AND :date_end
+        """
+
+        params: dict[str, object] = {
+            "date_start": date_start,
+            "date_end": date_end,
+        }
+
+        if squad_clause:
+            query += squad_clause
+            params.update(squad_params)
+        else:
+            query += " AND squad = 'ALL'"
+
+        query += " GROUP BY product ORDER BY checkout_conversion DESC"
+
+        rows = db.execute(text(query), params).fetchall()
+    else:
+        if not _table_exists(db, "tb_daily_product_summary"):
+            return []
+
+        query = """
+            SELECT
+                product,
+                SUM(initiate_checkout) as initiate_checkout,
+                SUM(purchase) as purchase,
+                CASE 
+                    WHEN SUM(initiate_checkout) > 0 
+                    THEN ROUND((SUM(purchase)::numeric / SUM(initiate_checkout)) * 100, 2)
+                    ELSE 0 
+                END as checkout_conversion
+            FROM tb_daily_product_summary
+            WHERE metric_date BETWEEN :date_start AND :date_end
+        """
+
+        params = {
+            "date_start": date_start,
+            "date_end": date_end,
+        }
+
+        query += " AND squad = 'ALL'"
+        query += " GROUP BY product ORDER BY checkout_conversion DESC"
+        rows = db.execute(text(query), params).fetchall()
+
     grouped: dict[str, dict[str, int | float]] = {}
     for row in rows:
         product_raw = str(row.product or "").strip()
@@ -954,11 +1022,17 @@ def get_conversion_breakdown(
         range_start = sp_today - timedelta(days=29)
         range_end = sp_today
     else:  # 24h ou daily
+        squad_clause, squad_params = _build_squad_scope_clause(squad)
         latest_query = """
             SELECT MAX(metric_date) AS latest_date
             FROM tb_daily_conversion_entities
             WHERE metric_date <= :today
-              AND (:squad IS NULL OR UPPER(squad) = UPPER(:squad))
+        """
+        if squad_clause:
+            latest_query += squad_clause
+        else:
+            latest_query += " AND squad = 'ALL'"
+        latest_query += """
               AND (:checkout IS NULL OR UPPER(checkout) = UPPER(:checkout))
               AND (
                 :product IS NULL
@@ -970,9 +1044,9 @@ def get_conversion_breakdown(
             text(latest_query),
             {
                 "today": sp_today,
-                "squad": squad,
                 "checkout": checkout,
                 "product": product,
+                **squad_params,
             },
         ).fetchone()
         latest_date = getattr(latest_row, "latest_date", None) if latest_row else None
@@ -984,6 +1058,7 @@ def get_conversion_breakdown(
     logger.info(f"🔍 Buscando conversion breakdown: period={period}, squad={squad}, checkout={checkout}, product={product}")
     logger.info(f"   Data range: {range_start} a {range_end}")
 
+    squad_clause, squad_params = _build_squad_scope_clause(squad)
     query = """
         SELECT
             squad,
@@ -998,7 +1073,6 @@ def get_conversion_breakdown(
             END AS checkout_conversion
         FROM tb_daily_conversion_entities
         WHERE metric_date BETWEEN :date_start AND :date_end
-          AND (:squad IS NULL OR UPPER(squad) = UPPER(:squad))
           AND (:checkout IS NULL OR UPPER(checkout) = UPPER(:checkout))
           AND (
             :product IS NULL
@@ -1009,14 +1083,19 @@ def get_conversion_breakdown(
         ORDER BY purchase DESC, initiate_checkout DESC
     """
 
+    if squad_clause:
+        query = query.replace("WHERE metric_date BETWEEN :date_start AND :date_end", f"WHERE metric_date BETWEEN :date_start AND :date_end{squad_clause}")
+    else:
+        query = query.replace("WHERE metric_date BETWEEN :date_start AND :date_end", "WHERE metric_date BETWEEN :date_start AND :date_end AND squad = 'ALL'")
+
     rows = db.execute(
         text(query),
         {
             "date_start": range_start,
             "date_end": range_end,
-            "squad": squad,
             "checkout": checkout,
             "product": product,
+            **squad_params,
         },
     ).fetchall()
 
@@ -1043,6 +1122,55 @@ def get_conversion_breakdown(
                 "purchase": int(row.purchase or 0),
                 "checkout_conversion": float(row.checkout_conversion or 0),
             }
+        )
+
+    # Quando o filtro representa setor com multiplos squads (ex.: yt = yts + ytf),
+    # consolida o retorno para evitar linhas duplicadas por squad no frontend.
+    scoped_squads = resolve_user_squad_scope(squad)
+    if scoped_squads and len(scoped_squads) > 1:
+        grouped: dict[tuple[str | None, str, str], dict[str, object]] = {}
+        scope_label = normalize_mapping_token(squad).upper() or "ALL"
+
+        for item in normalized:
+            key = (
+                str(item.get("metric_date") or "") or None,
+                str(item.get("checkout") or "unknown"),
+                str(item.get("product") or "unknown"),
+            )
+            agg = grouped.setdefault(
+                key,
+                {
+                    "metric_date": key[0],
+                    "squad": scope_label,
+                    "checkout": key[1],
+                    "product": key[2],
+                    "initiate_checkout": 0,
+                    "purchase": 0,
+                },
+            )
+            agg["initiate_checkout"] = _as_int(agg.get("initiate_checkout")) + _as_int(item.get("initiate_checkout"))
+            agg["purchase"] = _as_int(agg.get("purchase")) + _as_int(item.get("purchase"))
+
+        normalized = []
+        for agg in grouped.values():
+            initiate = _as_int(agg.get("initiate_checkout"))
+            purchase = _as_int(agg.get("purchase"))
+            conversion = round((purchase / initiate) * 100, 2) if initiate > 0 else 0.0
+            normalized.append(
+                {
+                    "metric_date": agg["metric_date"],
+                    "squad": agg["squad"],
+                    "checkout": agg["checkout"],
+                    "product": agg["product"],
+                    "initiate_checkout": initiate,
+                    "purchase": purchase,
+                    "checkout_conversion": conversion,
+                }
+            )
+
+        normalized.sort(
+            key=lambda item: (int(item["purchase"]), int(item["initiate_checkout"])),
+            reverse=True,
         )
 
     logger.info(f"   Resultados após normalização: {len(normalized)} registros")

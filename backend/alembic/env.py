@@ -1,7 +1,7 @@
 from logging.config import fileConfig
 
 from app.core.database import Base, DATABASE_URL
-from app.models import metrics  # noqa: F401
+from app.models import metrics, user  # noqa: F401
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool

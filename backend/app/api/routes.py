@@ -1,5 +1,7 @@
 from datetime import date
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, Path, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -13,9 +15,8 @@ from ..schemas.metrics_schema import (
     ConversionBreakdownItem,
     OfferResponse,
     ChartComparisonResponse,
-    TokenRequest,
-    TokenResponse,
 )
+from ..schemas.auth_schema import LoginRequest, TokenResponse, CurrentUserResponse, TokenPayload
 from ..services.redis_service import get_summary_cached, get_hourly_cached
 from ..services.metrics_service import (
     get_metrics_by_period,
@@ -27,12 +28,20 @@ from ..services.metrics_service import (
 from ..services.offer_service import sync_fetch_offer_data
 from ..services.filter_service import FilterService
 from ..services.auth_service import AuthService
-from ..core.auth_middleware import get_current_user
+from ..core.auth_middleware import get_current_user, require_admin
 
 # Routers
 router = APIRouter()
-metrics_router = APIRouter(prefix="/metrics", tags=["metrics"])
+metrics_router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[Depends(get_current_user)])
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _enforce_squad_filter_permission(current_user: TokenPayload, source: str | None = None, squad: str | None = None) -> None:
+    if current_user.role != "admin" and (source or squad):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Filtro de squad permitido apenas para administradores",
+        )
 
 
 def _parse_iso_date(value: str | None, field_name: str) -> date | None:
@@ -48,12 +57,35 @@ def _get_value(obj, key, default=None):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
+
+def _as_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value if value is not None else default)
+    except (TypeError, ValueError):
+        return float(default)
+
 def _empty_summary_payload():
     return {
         "today": {"cost": 0, "profit": 0, "revenue": 0, "checkout": 0, "roi": 0},
         "yesterday": {"cost": 0, "profit": 0, "revenue": 0, "checkout": 0, "roi": 0},
         "comparison": {"cost_change": 0, "profit_change": 0, "revenue_change": 0, "checkout_change": 0, "roi_change": 0},
     }
+
+
+def _resolve_user_scope(current_user: TokenPayload) -> str | None:
+    return current_user.sector or AuthService.resolve_user_sector(current_user.username)
+
+
+def _resolve_effective_source(current_user: TokenPayload, source: str | None) -> str | None:
+    if current_user.role == "admin":
+        return source
+    return _resolve_user_scope(current_user)
+
+
+def _resolve_effective_squad(current_user: TokenPayload, squad: str | None) -> str | None:
+    if current_user.role == "admin":
+        return squad
+    return _resolve_user_scope(current_user)
 
 def get_db():
     db = SessionLocal()
@@ -108,10 +140,13 @@ def get_summary(
             default=False,
             description="Quando true, ignora cache e recalcula o summary atualizado",
         ),
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: TokenPayload = Depends(get_current_user),
 ):
+    _enforce_squad_filter_permission(current_user, source=source)
     # Normalizar filtros usando FilterService
-    filters = FilterService.build_filters(period=period, source=source, checkout=checkout, product=product)
+    effective_source = _resolve_effective_source(current_user, source)
+    filters = FilterService.build_filters(period=period, source=effective_source, checkout=checkout, product=product)
 
     result = get_summary_cached(
         db,
@@ -199,9 +234,11 @@ def get_hourly(
         description="Squad/Origem de tráfego para filtrar os dados (ex.: yts, ytf)",
         examples=["yts", "ytf"],
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
-    filters = FilterService.build_filters(source=source)
+    _enforce_squad_filter_permission(current_user, source=source)
+    filters = FilterService.build_filters(source=_resolve_effective_source(current_user, source))
     rows = get_hourly_cached(db, filters.source)
 
     data = [
@@ -210,11 +247,11 @@ def get_hourly(
             "slot": str(_get_value(row, "slot", "")),
             "day": str(_get_value(row, "day", "")),
             "hour": str(_get_value(row, "hour", "")),
-            "checkout_conversion": float(_get_value(row, "checkout_conversion", 0) or 0),
-            "cost": float(_get_value(row, "cost", 0) or 0),
-            "profit": float(_get_value(row, "profit", 0) or 0),
-            "revenue": float(_get_value(row, "revenue", 0) or 0),
-            "roi": float(_get_value(row, "roi", 0) or 0) * 100,
+            "checkout_conversion": _as_float(_get_value(row, "checkout_conversion", 0)),
+            "cost": _as_float(_get_value(row, "cost", 0)),
+            "profit": _as_float(_get_value(row, "profit", 0)),
+            "revenue": _as_float(_get_value(row, "revenue", 0)),
+            "roi": _as_float(_get_value(row, "roi", 0)) * 100,
         }
         for row in rows
     ]
@@ -253,8 +290,10 @@ def get_hourly_period(
     ),
     date_start: str | None = Query(default=None, description="Data inicial opcional (YYYY-MM-DD)"),
     date_end: str | None = Query(default=None, description="Data final opcional (YYYY-MM-DD)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
+    _enforce_squad_filter_permission(current_user, source=source)
     """
     Retorna métricas agregadas por hora para um período específico.
     
@@ -265,7 +304,7 @@ def get_hourly_period(
     """
     filters = FilterService.build_filters(
         period=period,
-        source=source,
+        source=_resolve_effective_source(current_user, source),
         checkout=checkout,
         product=product,
         date_start=date_start,
@@ -295,11 +334,11 @@ def get_hourly_period(
             "slot": str(_get_value(row, "slot", "")),
             "day": str(_get_value(row, "day", "")),
             "hour": str(_get_value(row, "hour", "")),
-            "checkout_conversion": float(_get_value(row, "checkout_conversion", 0) or 0),
-            "cost": float(_get_value(row, "cost", 0) or 0),
-            "profit": float(_get_value(row, "profit", 0) or 0),
-            "revenue": float(_get_value(row, "revenue", 0) or 0),
-            "roi": float(_get_value(row, "roi", 0) or 0) * 100,
+            "checkout_conversion": _as_float(_get_value(row, "checkout_conversion", 0)),
+            "cost": _as_float(_get_value(row, "cost", 0)),
+            "profit": _as_float(_get_value(row, "profit", 0)),
+            "revenue": _as_float(_get_value(row, "revenue", 0)),
+            "roi": _as_float(_get_value(row, "roi", 0)) * 100,
         }
         for row in rows
     ]
@@ -351,12 +390,14 @@ def get_by_checkout(
         description="Squad para filtrar os dados (ex.: yts, ytf)",
         examples=["yts", "ytf"],
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
+    _enforce_squad_filter_permission(current_user, source=source)
     """
     Retorna conversão por checkout (Cartpanda vs Clickbank).
     """
-    filters = FilterService.build_filters(period=period, source=source)
+    filters = FilterService.build_filters(period=period, source=_resolve_effective_source(current_user, source))
     data = get_checkout_summary(db, filters.source, filters.period)
     return data
 
@@ -405,12 +446,14 @@ def get_by_product(
         description="Squad para filtrar os dados (ex.: yts, ytf)",
         examples=["yts", "ytf"],
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
+    _enforce_squad_filter_permission(current_user, source=source)
     """
     Retorna conversão por produto.
     """
-    filters = FilterService.build_filters(period=period, source=source)
+    filters = FilterService.build_filters(period=period, source=_resolve_effective_source(current_user, source))
     data = get_product_summary(db, filters.source, filters.period)
     return data
 
@@ -449,7 +492,8 @@ def get_by_squad(
         description="Período: 24h, daily, weekly, monthly",
         examples=["24h", "daily", "weekly", "monthly"],
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: TokenPayload = Depends(require_admin),
 ):
     """
     Retorna métricas agregadas por squad.
@@ -483,10 +527,13 @@ def get_conversion_breakdown_route(
     date_start: str | None = Query(default=None, description="Data inicial opcional (YYYY-MM-DD)"),
     date_end: str | None = Query(default=None, description="Data final opcional (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
+    _enforce_squad_filter_permission(current_user, squad=squad)
+    effective_squad = _resolve_effective_squad(current_user, squad)
     filters = FilterService.build_filters(
         period=period,
-        squad=squad,
+        squad=effective_squad,
         checkout=checkout,
         product=product,
         date_start=date_start,
@@ -533,10 +580,13 @@ def get_charts_compare(
     checkout: str | None = Query(default=None, description="Filtro opcional de checkout"),
     product: str | None = Query(default=None, description="Filtro opcional de produto"),
     db: Session = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
+    _enforce_squad_filter_permission(current_user, source=source)
+    effective_source = _resolve_effective_source(current_user, source)
     filters = FilterService.build_filters(
         period=period,
-        source=source,
+        source=effective_source,
         checkout=checkout,
         product=product,
     )
@@ -571,11 +621,11 @@ def get_charts_compare(
                 "slot": str(_get_value(row, "slot", "")),
                 "day": str(_get_value(row, "day", "")),
                 "hour": str(_get_value(row, "hour", "")),
-                "checkout_conversion": float(_get_value(row, "checkout_conversion", 0) or 0),
-                "cost": float(_get_value(row, "cost", 0) or 0),
-                "profit": float(_get_value(row, "profit", 0) or 0),
-                "revenue": float(_get_value(row, "revenue", 0) or 0),
-                "roi": float(_get_value(row, "roi", 0) or 0) * 100,
+                "checkout_conversion": _as_float(_get_value(row, "checkout_conversion", 0)),
+                "cost": _as_float(_get_value(row, "cost", 0)),
+                "profit": _as_float(_get_value(row, "profit", 0)),
+                "revenue": _as_float(_get_value(row, "revenue", 0)),
+                "roi": _as_float(_get_value(row, "roi", 0)) * 100,
             }
             for row in rows
         ]
@@ -691,8 +741,9 @@ def get_cartpanda_offer(
     }
 
 # ✅ ROTA DE LOGIN (pública - sem proteção)
+@router.post("/login", response_model=TokenResponse, tags=["auth"])
 @auth_router.post("/login", response_model=TokenResponse)
-async def login(credentials: TokenRequest):
+async def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     """
     Endpoint de login
 
@@ -702,20 +753,29 @@ async def login(credentials: TokenRequest):
     - Username: Admin
     - Password: #agenciatitan2026
     """
-    # Verifica credenciais
-    if not AuthService.verify_credentials(credentials.username, credentials.password):
+    user = AuthService.authenticate_user(db, credentials.username, credentials.password)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos",
         )
 
-    # Gera token
-    token, expires_in = AuthService.create_access_token(credentials.username)
+    token, expires_in = AuthService.create_access_token(user)
 
     return TokenResponse(
         access_token=token,
         token_type="bearer",
         expires_in=expires_in
+    )
+
+
+@auth_router.get("/me", response_model=CurrentUserResponse)
+async def me(current_user: Annotated[TokenPayload, Depends(get_current_user)]):
+    return CurrentUserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        sector=current_user.sector or AuthService.resolve_user_sector(current_user.username),
     )
 
 
