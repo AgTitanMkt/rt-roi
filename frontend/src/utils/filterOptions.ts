@@ -10,19 +10,21 @@ export const PERIOD_OPTIONS = [
   { value: "monthly", label: "Mensal" },
 ];
 
+// Opções para filtro de squad/source
 export const SQUAD_OPTIONS = [
   { value: "", label: "Todos os squads" },
-  { value: "yts", label: "YT Shenlong" },
-  { value: "ytf", label: "YT Fenix" },
-  { value: "nte", label: "Native Erick" },
-  { value: "ntl", label: "Native Luigi" },
+  { value: "youtube", label: "YouTube" }, // Agregado YTS + YTF
+  { value: "native", label: "Native" },   // Agregado NTE + NTL
   { value: "fb", label: "Facebook" },
+  // Adicione outros squads aqui se necessário
 ];
 
 export const CHECKOUT_OPTIONS = [
   { value: "", label: "Todos os checkouts" },
   { value: "Cartpanda", label: "Cartpanda" },
   { value: "Clickbank", label: "Clickbank" },
+  { value: "buygoods", label: "Buygoods" },
+  { value: "digistore", label: "Digistore" },
 ];
 
 export const PRODUCT_OPTIONS = [

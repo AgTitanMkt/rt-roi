@@ -29,6 +29,7 @@ from ..services.offer_service import sync_fetch_offer_data
 from ..services.filter_service import FilterService
 from ..services.auth_service import AuthService
 from ..core.auth_middleware import get_current_user, require_admin
+from ..core.user_scope import resolve_user_squad_scope
 
 # Routers
 router = APIRouter()
@@ -144,8 +145,23 @@ def get_summary(
         current_user: TokenPayload = Depends(get_current_user),
 ):
     _enforce_squad_filter_permission(current_user, source=source)
+    # Validação explícita do parâmetro period
+    valid_periods = {"24h", "daily", "weekly", "monthly"}
+    if period not in valid_periods:
+        raise HTTPException(status_code=422, detail=f"Período inválido: {period}. Use um dos: {', '.join(valid_periods)}")
+
     # Normalizar filtros usando FilterService
-    effective_source = _resolve_effective_source(current_user, source)
+    if current_user.role == "admin":
+        effective_source = source
+    else:
+        # Para usuário comum, resolve todos os squads permitidos pelo setor
+        squads = resolve_user_squad_scope(current_user.sector or current_user.username)
+        if squads and len(squads) > 1:
+            # Se houver mais de um squad, envia o setor (ex: 'native', 'youtube') para o filtro, que já agrega corretamente
+            effective_source = current_user.sector or current_user.username
+        else:
+            # Se só houver um squad, envia ele diretamente
+            effective_source = squads[0] if squads else None
     filters = FilterService.build_filters(period=period, source=effective_source, checkout=checkout, product=product)
 
     result = get_summary_cached(
@@ -181,9 +197,8 @@ def get_summary(
             "revenue_change": float((result.get("comparison") or {}).get("revenue_change") or 0),
             "checkout_change": float((result.get("comparison") or {}).get("checkout_change") or 0),
             "roi_change": float((result.get("comparison") or {}).get("roi_change") or 0),
-        }
+        },
     }
-
     return summary_data
 
 @metrics_router.get(
@@ -319,14 +334,18 @@ def get_hourly_period(
 
     rows = get_metrics_by_period(
         db,
-        filters.period,
-        filters.source,
+        start_date=parsed_start,
+        end_date=parsed_end,
+        squad=filters.source,
         checkout=filters.checkout,
         product=filters.product,
-        date_start=parsed_start,
-        date_end=parsed_end,
+        period=period,
     )
 
+    # Para weekly/monthly, garantir compatibilidade de estrutura para o frontend (série contínua de dias, hour='0')
+    if period in ("weekly", "monthly"):
+        # Ordena por data crescente
+        rows = sorted(rows, key=lambda r: getattr(r, "metric_date", ""))
     data = [
         {
             "squad": str(_get_value(row, "squad", "")),
@@ -594,23 +613,25 @@ def get_charts_compare(
     parsed_base = _parse_iso_date(base_date, "base_date")
     parsed_compare = _parse_iso_date(compare_date, "compare_date")
 
+    if parsed_base is None or parsed_compare is None:
+        raise HTTPException(status_code=422, detail="base_date e compare_date devem ser fornecidos e validos.")
     base_hourly_rows = get_metrics_by_period(
         db,
-        period=period,
-        source=filters.source,
+        start_date=parsed_base,
+        end_date=parsed_base,
+        squad=filters.source,
         checkout=filters.checkout,
         product=filters.product,
-        date_start=parsed_base,
-        date_end=parsed_base,
+        period=period,
     )
     compare_hourly_rows = get_metrics_by_period(
         db,
-        period=period,
-        source=filters.source,
+        start_date=parsed_compare,
+        end_date=parsed_compare,
+        squad=filters.source,
         checkout=filters.checkout,
         product=filters.product,
-        date_start=parsed_compare,
-        date_end=parsed_compare,
+        period=period,
     )
 
     def _to_hourly_payload(rows: list) -> list[dict[str, object]]:

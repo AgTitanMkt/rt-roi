@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "allow"  # Permite variáveis extras no ambiente
 
 
 settings = Settings()
@@ -27,4 +28,3 @@ settings = Settings()
 
 # Token expiration time
 TOKEN_EXPIRE_DELTA = timedelta(hours=settings.JWT_EXPIRATION_HOURS)
-

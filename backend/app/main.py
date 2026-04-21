@@ -11,9 +11,15 @@ from .services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
+
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+MAX_PAYLOAD_SIZE = 2 * 1024 * 1024  # 2MB
+
 app = FastAPI()
 
-# CORS Configuration - Allow frontend and local development
+# CORS Configuration - Restrict to localhost/internal dev only
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -30,6 +36,18 @@ app.add_middleware(
     allow_headers=["*"],
     max_age=3600,
 )
+
+# Middleware to limit payload size
+@app.middleware("http")
+async def limit_payload_size(request: Request, call_next):
+    if request.method in ("POST", "PUT", "PATCH"):
+        body = await request.body()
+        if len(body) > MAX_PAYLOAD_SIZE:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": f"Payload too large. Limit is {MAX_PAYLOAD_SIZE // (1024 * 1024)}MB."}
+            )
+    return await call_next(request)
 
 
 @app.on_event("startup")

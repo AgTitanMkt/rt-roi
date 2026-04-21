@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useFilters } from "../context/useFilters";
 import type { Filters } from "../context/filterContextTypes";
 import { PERIOD_OPTIONS, SQUAD_OPTIONS, CHECKOUT_OPTIONS, PRODUCT_OPTIONS } from "../utils/filterOptions";
@@ -23,6 +23,20 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 }) => {
   const { filters, updateFilter, resetFilters, chartComparison, updateChartComparison, resetChartComparison } = useFilters();
   const canUseSquadFilter = isAdmin();
+  // Para admin, mostra todas as opções de squad (incluindo YouTube/Native agregados)
+  // Para usuário comum, não mostra filtro de squad (ou poderia mostrar apenas o squad real, se desejar)
+  const squadOptions = canUseSquadFilter ? SQUAD_OPTIONS : [];
+
+  // --- CORREÇÃO: Garante que o valor do filtro de squad seja válido para admin ---
+  useEffect(() => {
+    if (canUseSquadFilter) {
+      const validValues = squadOptions.map(opt => opt.value);
+      if (filters.squad && !validValues.includes(filters.squad)) {
+        updateFilter("squad", "");
+      }
+    }
+  }, [canUseSquadFilter, squadOptions, filters.squad, updateFilter]);
+  // --- FIM DA CORREÇÃO ---
 
   const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const period = e.target.value as Filters["period"];
@@ -76,6 +90,34 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   };
 
   if (compact) {
+    // Se não for admin, não renderiza o filtro de squad
+    if (!canUseSquadFilter) {
+      return (
+        <div className="filterBar filterBar--compact">
+          <div className="filterBar__group">
+            <label htmlFor="period-select" className="filterBar__label">
+              Período:
+            </label>
+            <select
+              id="period-select"
+              value={filters.period}
+              onChange={handlePeriodChange}
+              className="filterBar__select"
+            >
+              {PERIOD_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button onClick={handleReset} className="filterBar__reset">
+            Limpar
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="filterBar filterBar--compact">
         <div className="filterBar__group">
@@ -96,23 +138,25 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </select>
         </div>
 
-        {canUseSquadFilter && <div className="filterBar__group">
-          <label htmlFor="squad-select" className="filterBar__label">
-            Squad:
-          </label>
-          <select
-            id="squad-select"
-            value={filters.squad || ""}
-            onChange={handleSquadChange}
-            className="filterBar__select"
-          >
-            {SQUAD_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>}
+        {canUseSquadFilter && (
+          <div className="filterBar__group">
+            <label htmlFor="squad-select" className="filterBar__label">
+              Squad:
+            </label>
+            <select
+              id="squad-select"
+              value={filters.squad || ""}
+              onChange={handleSquadChange}
+              className="filterBar__select"
+            >
+              {squadOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <button onClick={handleReset} className="filterBar__reset">
           Limpar
@@ -144,23 +188,25 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             </select>
           </div>
 
-          {canUseSquadFilter && <div className="filterBar__group">
-            <label htmlFor="squad-select" className="filterBar__label">
-              Squad
-            </label>
-            <select
-              id="squad-select"
-              value={filters.squad || ""}
-              onChange={handleSquadChange}
-              className="filterBar__select"
-            >
-              {SQUAD_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>}
+           {canUseSquadFilter && (
+             <div className="filterBar__group">
+               <label htmlFor="squad-select" className="filterBar__label">
+                 Squad
+               </label>
+               <select
+                 id="squad-select"
+                 value={filters.squad || ""}
+                 onChange={handleSquadChange}
+                 className="filterBar__select"
+               >
+                 {squadOptions.map((opt) => (
+                   <option key={opt.value} value={opt.value}>
+                     {opt.label}
+                   </option>
+                 ))}
+               </select>
+             </div>
+           )}
 
            <div className="filterBar__group">
              <label htmlFor="checkout-select" className="filterBar__label">

@@ -25,8 +25,10 @@ UNKNOWN_DIMENSION = "unknown"
 
 # Estruturas orientadas a aliases: adicione novos valores apenas aqui.
 CHECKOUT_MAPPINGS = [
-	{"value": "Cartpanda", "aliases": ["cartpanda"]},
-	{"value": "Clickbank", "aliases": ["clickbank"]},
+    {"value": "Cartpanda", "aliases": ["cartpanda"]},
+    {"value": "Clickbank", "aliases": ["clickbank"]},
+    {"value": "Digistore", "aliases": ["digistore"]},
+    {"value": "Buygoods", "aliases": ["buygoods"]},
 ]
 
 SQUAD_MAPPINGS = [
