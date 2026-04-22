@@ -32,7 +32,7 @@ const yesterday = new Date(now);
 yesterday.setDate(now.getDate() - 1);
 
 const DEFAULT_CHART_COMPARISON: ChartComparisonFilters = {
-  enabled: true,
+  enabled: false,
   base_date: toIsoDate(now),
   compare_date: toIsoDate(yesterday),
 };

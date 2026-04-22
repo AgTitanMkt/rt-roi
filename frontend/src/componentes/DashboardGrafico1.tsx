@@ -73,7 +73,7 @@ const ComparisonTooltip = ({
 
   const row = payload[0]?.payload;
   const isHourly = period === "24h" || period === "daily";
-  const hourLabel = isHourly ? `${String(label).padStart(2, "0")}:00` : `Dia ${label}`;
+  const pointLabel = String(row?.axisLabel ?? label ?? (isHourly ? "00:00" : "-"));
 
   return (
     <div
@@ -86,7 +86,7 @@ const ComparisonTooltip = ({
       }}
     >
       <div style={{ color: "#e2e8f0", fontWeight: 700, marginBottom: "8px" }}>
-        {isHourly ? "Hora:" : "Data:"} {hourLabel}
+        {isHourly ? "Hora:" : "Data:"} {pointLabel}
       </div>
 
       <div style={{ color: "#bfdbfe", fontSize: "12px", fontWeight: 600 }}>
@@ -121,6 +121,20 @@ const ComparisonTooltip = ({
     </div>
   );
 };
+
+const formatDateAxisLabel = (value?: string): string => {
+  if (!value) return "-";
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}/${month}`;
+};
+
+const sortByMetricDate = (items: HourlyMetric[]): HourlyMetric[] =>
+  [...items].sort((left, right) => {
+    const leftValue = left.metric_date ?? left.slot ?? "";
+    const rightValue = right.metric_date ?? right.slot ?? "";
+    return leftValue.localeCompare(rightValue);
+  });
 
 // Extrai hora ou dia de um item
 const extractTimeKey = (item: HourlyMetric, period: string): { key: string; display: string } => {
@@ -180,6 +194,34 @@ const DashboardGrafico = ({
   const itemsCount = isHourly ? HOURS_PER_DAY : (period === "weekly" ? DAYS_PER_WEEK : DAYS_PER_MONTH);
 
   const dadosUnificados = useMemo(() => {
+    if (!isHourly) {
+      const baseSeries = sortByMetricDate(hourlyData);
+      const compareSeries = sortByMetricDate(comparedHourlyData);
+      const totalItems = Math.max(itemsCount, baseSeries.length, compareSeries.length);
+
+      return Array.from({ length: totalItems }, (_, index) => {
+        const base = baseSeries[index];
+        const compare = compareSeries[index];
+
+        return {
+          xKey: String(index + 1),
+          axisLabel: formatDateAxisLabel(base?.metric_date ?? compare?.metric_date),
+          checkout_base: Number(base?.checkout_conversion ?? 0),
+          gasto_base: Number(base?.cost ?? 0),
+          faturamento_base: Number(base?.revenue ?? 0),
+          relacao_base: Number(base?.roi ?? 0),
+          checkout_compare: Number(compare?.checkout_conversion ?? 0),
+          gasto_compare: Number(compare?.cost ?? 0),
+          faturamento_compare: Number(compare?.revenue ?? 0),
+          relacao_compare: Number(compare?.roi ?? 0),
+        };
+      }).filter((item) => {
+        const baseHasData = item.checkout_base || item.gasto_base || item.faturamento_base || item.relacao_base;
+        const compareHasData = item.checkout_compare || item.gasto_compare || item.faturamento_compare || item.relacao_compare;
+        return Boolean(baseHasData || compareHasData);
+      });
+    }
+
     const baseByKey = aggregateByTimeKey(hourlyData, period);
     const compareByKey = aggregateByTimeKey(comparedHourlyData, period);
 
@@ -228,9 +270,9 @@ const DashboardGrafico = ({
     relacaoBaseMax,
   ];
 
-  const labelsNegativos = dadosUnificados
+   const labelsNegativos = dadosUnificados
     .filter((d) => d.relacao_base < 1)
-    .map((d) => d.xKey);
+     .map((d) => d.axisLabel);
 
   const nameByKey: Record<string, string> = {
     checkout_base: compareLabel ? `Checkout ${compareLabel.baseDate}` : "Checkout",
@@ -302,14 +344,8 @@ const DashboardGrafico = ({
                 stroke="rgba(51, 65, 85, 0.55)"
               />
               <XAxis
-                 dataKey="xKey"
-                 tickFormatter={(value) => {
-                   if (isHourly) {
-                     return `${String(value).padStart(2, "0")}:00`;
-                   } else {
-                     return `Dia ${value}`;
-                   }
-                 }}
+                  dataKey="axisLabel"
+                  tickFormatter={(value) => String(value)}
                  tick={{ fill: "#94a3b8", fontSize: 10 }}
                  axisLine={false}
                  tickLine={false}
@@ -360,7 +396,7 @@ const DashboardGrafico = ({
                {labelsNegativos.map((label) => (
                  <ReferenceLine
                    key={`neg-${label}`}
-                   x={label}
+                    x={label}
                    stroke="#ef4444"
                    strokeDasharray="3 6"
                    strokeOpacity={0.45}

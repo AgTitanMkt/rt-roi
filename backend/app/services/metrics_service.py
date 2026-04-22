@@ -163,6 +163,8 @@ def _get_checkout_conversion_range(
     if not _table_exists(db, "tb_daily_checkout_summary"):
         return None
 
+    squad_clause, squad_params = _build_squad_scope_clause(source, column_name="squad", param_name="source")
+
     query = """
         SELECT
             SUM(initiate_checkout) AS initiate_checkout,
@@ -177,9 +179,9 @@ def _get_checkout_conversion_range(
         "end_date": end_date,
     }
 
-    if source:
-        query += " AND UPPER(squad) = UPPER(:source)"
-        params["source"] = source
+    if squad_clause:
+        query += squad_clause
+        params.update(squad_params)
     else:
         query += " AND squad = 'ALL'"
 
@@ -650,8 +652,8 @@ def get_metrics_by_hour(db: Session, source: str = None):
 
 def get_metrics_by_period(
     db: Session,
-    start_date: date,
-    end_date: date,
+    start_date: date | None,
+    end_date: date | None,
     squad: str = None,
     checkout: str = None,
     product: str = None,
@@ -662,7 +664,7 @@ def get_metrics_by_period(
     checkout_type: str = None,
 ):
     print(f"[DEBUG] get_metrics_by_period params: start_date={start_date}, end_date={end_date}, squad={squad}, checkout={checkout}, product={product}, period={period}, timezone={timezone}, revenue={revenue}, offer_id={offer_id}, checkout_type={checkout_type}")
-    is_hourly = period in ("24h", "hourly")
+    is_hourly = period in ("24h", "hourly", "daily")
     now_sp = datetime.now(SAO_PAULO_TZ)
     sp_today = now_sp.date()
     sp_yesterday = sp_today - timedelta(days=1)
@@ -806,6 +808,30 @@ def get_metrics_by_period(
                     "squad": squad or ""
                 })())
         # Ordem crescente
+        return filled
+
+    # Para daily, garantir série contínua de 24 horas
+    if is_hourly and period == "daily":
+        # rows: lista de resultados do banco agrupados por hora
+        row_by_hour = {str(getattr(row, "hour", None)): row for row in rows}
+        filled = []
+        for h in range(24):
+            hour_str = str(h)
+            if hour_str in row_by_hour:
+                filled.append(row_by_hour[hour_str])
+            else:
+                filled.append(type("Row", (), {
+                    "metric_date": date_start.isoformat(),
+                    "slot": f"{date_start.isoformat()}T{h:02d}:00:00",
+                    "hour": hour_str,
+                    "day": "today",
+                    "checkout_conversion": 0.0,
+                    "cost": 0.0,
+                    "profit": 0.0,
+                    "revenue": 0.0,
+                    "roi": 0.0,
+                    "squad": squad or ""
+                })())
         return filled
 
     # Reverter ordem para crescente (mais antigo primeiro)
@@ -1138,8 +1164,9 @@ def get_conversion_breakdown(
     logger.info(f"   Data range: {range_start} a {range_end}")
 
     squad_clause, squad_params = _build_squad_scope_clause(squad)
-    query = """
+    query = f"""
         SELECT
+            metric_date,
             squad,
             checkout,
             product,
@@ -1152,19 +1179,16 @@ def get_conversion_breakdown(
             END AS checkout_conversion
         FROM tb_daily_conversion_entities
         WHERE metric_date BETWEEN :date_start AND :date_end
+          {squad_clause}
           AND (:checkout IS NULL OR UPPER(checkout) = UPPER(:checkout))
           AND (
             :product IS NULL
             OR regexp_replace(UPPER(product), '[\\s_-]+', '', 'g')
                = regexp_replace(UPPER(:product), '[\\s_-]+', '', 'g')
           )
-        GROUP BY squad, checkout, product
-        ORDER BY purchase DESC, initiate_checkout DESC
+        GROUP BY metric_date, squad, checkout, product
+        ORDER BY metric_date ASC, purchase DESC, initiate_checkout DESC
     """
-
-    if squad_clause:
-        query = query.replace("WHERE metric_date BETWEEN :date_start AND :date_end", f"WHERE metric_date BETWEEN :date_start AND :date_end{squad_clause}")
-    # Para admin sem filtro de squad, não adiciona filtro de squad (busca todos)
 
     rows = db.execute(
         text(query),
@@ -1181,15 +1205,11 @@ def get_conversion_breakdown(
 
     logger.info(f"   Resultados da query: {len(rows)} linhas retornadas")
 
-    # Determinar se é necessário preencher dias ausentes
-    fill_dates = period in ("weekly", "monthly")
-
-    # Montar lista de datas do período
-    if fill_dates:
-        num_days = (range_end - range_start).days + 1
-        date_list = [(range_start + timedelta(days=i)).isoformat() for i in range(num_days)]
-    else:
-        date_list = None
+    # O frontend agrega esse endpoint por checkout/produto e não precisa de placeholders.
+    # Preencher dias ausentes aqui introduz linhas artificiais com zero e ainda pode
+    # sobrescrever combinações reais quando existem múltiplos squads na mesma data.
+    fill_dates = False
+    date_list = None
 
     # Normalização dos dados
     normalized: list[dict[str, object]] = []
@@ -1202,7 +1222,8 @@ def get_conversion_breakdown(
         if product and _product_token(product_value) != _product_token(product):
             continue
 
-        metric_date_marker = getattr(row, "metric_date", None) or (str(range_start) if range_start == range_end else None)
+        metric_date_value = getattr(row, "metric_date", None)
+        metric_date_marker = metric_date_value.isoformat() if isinstance(metric_date_value, date) else (str(metric_date_value) if metric_date_value else (str(range_start) if range_start == range_end else None))
         key = (metric_date_marker, str(row.checkout or "unknown"), product_value)
         payload = {
             "metric_date": metric_date_marker,
@@ -1216,37 +1237,6 @@ def get_conversion_breakdown(
         row_by_date_checkout_product[key] = payload
         normalized.append(payload)
 
-    # Preencher dias ausentes para weekly/monthly
-    if fill_dates and date_list:
-        # Descobrir todos os checkouts e produtos presentes no período
-        checkouts = set()
-        products = set()
-        for payload in normalized:
-            checkouts.add(payload["checkout"])
-            products.add(payload["product"])
-        # Se não houver dados, garantir pelo menos um placeholder
-        if not checkouts:
-            checkouts.add("unknown")
-        if not products:
-            products.add("UNKNOWN")
-        filled = []
-        for d in date_list:
-            for checkout in checkouts:
-                for product in products:
-                    key = (d, checkout, product)
-                    if key in row_by_date_checkout_product:
-                        filled.append(row_by_date_checkout_product[key])
-                    else:
-                        filled.append({
-                            "metric_date": d,
-                            "squad": normalize_mapping_token(squad).upper() if squad else "ALL",
-                            "checkout": checkout,
-                            "product": product,
-                            "initiate_checkout": 0,
-                            "purchase": 0,
-                            "checkout_conversion": 0.0,
-                        })
-        normalized = filled
 
     # Quando o filtro representa setor com multiplos squads (ex.: yt = yts + ytf),
     # consolida o retorno para evitar linhas duplicadas por squad no frontend.

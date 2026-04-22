@@ -190,7 +190,7 @@ function App() {
           comparedHourlyData={compareHourlyData}
           isLoading={isLoading}
           selectedSquad={filters.squad || ""}
-          period={chartComparison.enabled ? "daily" : filters.period}
+          period={filters.period}
           compareLabel={
             chartComparison.enabled && chartComparisonData
               ? { baseDate: chartComparisonData.baseDate, compareDate: chartComparisonData.compareDate }

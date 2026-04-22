@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from typing import Annotated
 
@@ -36,6 +36,15 @@ router = APIRouter()
 metrics_router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[Depends(get_current_user)])
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
+VALID_PERIODS = {"24h", "daily", "weekly", "monthly"}
+
+def _validate_period(period: str) -> str:
+    if period not in VALID_PERIODS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Período inválido: {period}. Use um dos: {', '.join(VALID_PERIODS)}"
+        )
+    return period
 
 def _enforce_squad_filter_permission(current_user: TokenPayload, source: str | None = None, squad: str | None = None) -> None:
     if current_user.role != "admin" and (source or squad):
@@ -52,6 +61,14 @@ def _parse_iso_date(value: str | None, field_name: str) -> date | None:
         return date.fromisoformat(value.strip())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"{field_name} invalido. Use YYYY-MM-DD") from exc
+
+
+def _resolve_period_range(anchor_date: date, period: str) -> tuple[date, date]:
+    if period == "weekly":
+        return anchor_date - timedelta(days=6), anchor_date
+    if period == "monthly":
+        return anchor_date - timedelta(days=29), anchor_date
+    return anchor_date, anchor_date
 
 def _get_value(obj, key, default=None):
     if isinstance(obj, dict):
@@ -144,6 +161,8 @@ def get_summary(
         db: Session = Depends(get_db),
         current_user: TokenPayload = Depends(get_current_user),
 ):
+
+    _validate_period(period)
     _enforce_squad_filter_permission(current_user, source=source)
     # Validação explícita do parâmetro period
     valid_periods = {"24h", "daily", "weekly", "monthly"}
@@ -308,6 +327,7 @@ def get_hourly_period(
     db: Session = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    _validate_period(period)
     _enforce_squad_filter_permission(current_user, source=source)
     """
     Retorna métricas agregadas por hora para um período específico.
@@ -344,7 +364,6 @@ def get_hourly_period(
 
     # Para weekly/monthly, garantir compatibilidade de estrutura para o frontend (série contínua de dias, hour='0')
     if period in ("weekly", "monthly"):
-        # Ordena por data crescente
         rows = sorted(rows, key=lambda r: getattr(r, "metric_date", ""))
     data = [
         {
@@ -412,6 +431,7 @@ def get_by_checkout(
     db: Session = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    _validate_period(period)
     _enforce_squad_filter_permission(current_user, source=source)
     """
     Retorna conversão por checkout (Cartpanda vs Clickbank).
@@ -468,6 +488,7 @@ def get_by_product(
     db: Session = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    _validate_period(period)
     _enforce_squad_filter_permission(current_user, source=source)
     """
     Retorna conversão por produto.
@@ -601,6 +622,7 @@ def get_charts_compare(
     db: Session = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    _validate_period(period)
     _enforce_squad_filter_permission(current_user, source=source)
     effective_source = _resolve_effective_source(current_user, source)
     filters = FilterService.build_filters(
@@ -615,10 +637,14 @@ def get_charts_compare(
 
     if parsed_base is None or parsed_compare is None:
         raise HTTPException(status_code=422, detail="base_date e compare_date devem ser fornecidos e validos.")
+
+    base_start, base_end = _resolve_period_range(parsed_base, period)
+    compare_start, compare_end = _resolve_period_range(parsed_compare, period)
+
     base_hourly_rows = get_metrics_by_period(
         db,
-        start_date=parsed_base,
-        end_date=parsed_base,
+        start_date=base_start,
+        end_date=base_end,
         squad=filters.source,
         checkout=filters.checkout,
         product=filters.product,
@@ -626,8 +652,8 @@ def get_charts_compare(
     )
     compare_hourly_rows = get_metrics_by_period(
         db,
-        start_date=parsed_compare,
-        end_date=parsed_compare,
+        start_date=compare_start,
+        end_date=compare_end,
         squad=filters.source,
         checkout=filters.checkout,
         product=filters.product,
@@ -657,8 +683,8 @@ def get_charts_compare(
         squad=filters.squad,
         checkout=filters.checkout,
         product=filters.product,
-        date_start=parsed_base,
-        date_end=parsed_base,
+        date_start=base_start,
+        date_end=base_end,
     )
     compare_conversion = get_conversion_breakdown(
         db,
@@ -666,8 +692,8 @@ def get_charts_compare(
         squad=filters.squad,
         checkout=filters.checkout,
         product=filters.product,
-        date_start=parsed_compare,
-        date_end=parsed_compare,
+        date_start=compare_start,
+        date_end=compare_end,
     )
 
     return {

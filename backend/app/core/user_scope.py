@@ -9,7 +9,7 @@ USER_SECTOR_SCOPE: dict[str, str] = {
 }
 
 USER_SECTOR_SQUADS: dict[str, tuple[str, ...]] = {
-    "nt": ("NTE",),
+    "nt": ("NTE", "NTL"),
     "yt": ("YTS", "YTF"),
     "fb": ("FB",),
 }
